@@ -51,7 +51,7 @@ final class Time_Measure: XCTestCase {
 		
 		measure {
 			for _ in 1...1000 {
-				let a = Arbit.quoAndRem(string: s, by: 1234567890)
+				_ = Arbit.quoAndRem(string: s, by: 1234567890)
 			}
 		}
 	}

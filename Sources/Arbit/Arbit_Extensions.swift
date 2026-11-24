@@ -132,6 +132,8 @@ extension String {
 	@inlinable
 	public static func random(numbers n: Int) -> String {
 		
+		guard n > 0 else { return "0" }
+		
 		var randomString = [Character]()
 		
 		randomString.append("123456789".randomElement()!)
@@ -212,15 +214,7 @@ extension String? {
 
 extension String {
 	
-	subscript (i: Int) -> Character {
-		get {
-			self[index(startIndex, offsetBy: i)]
-		}
-		set(chr) {
-			//			self[self.index(startIndex, offsetBy: i)]. = "chr"
-			self = replacingCharacters(in: startIndex..<endIndex, with: String(chr))
-		}
-	}
+	subscript (i: Int) -> Character { self[index(startIndex, offsetBy: i)] }
 	
 	subscript (r: Range<Int>) -> Substring {
 		

@@ -1,39 +1,53 @@
 import Foundation
 
 // MARK: Binary << & | ~ ^
+///
+/// The bitwise operations work on integers only, a fraction or an error value gives `nan`.
+/// Negative numbers behave as two's complement with endless sign bits, like at `Int`: `~5 == -6`, `-1 & 255 == 255`.
+///
 extension Arbit: BinaryInteger {
 	
 	public typealias Words = [UInt]
+	
+	/// The two's complement words of the integer part, from the least significant one
 	public var words: [UInt] {
-		fatalError()
+		
+		guard error == nil else { return [0] }
+		
+		let wordBits = UInt.bitWidth
+		let width = ((magnitudeBits.count + 1 + wordBits - 1) / wordBits) * wordBits
+		let bits = twosComplement(width: width)
+		
+		return stride(from: 0, to: width, by: wordBits).map { base in
+			var word: UInt = 0
+			for i in 0..<wordBits where bits[base + i] { word |= 1 << UInt(i) }
+			return word
+		}
 	}
 	
 	
 	
 	// MARK: Init
 	
-	public init?<T>(exactly source: T) where T : BinaryInteger {
-		self.integer = String(source.magnitude)
-		self.negative = source < 0
-	}
+	public init?<T>(exactly source: T) where T : BinaryInteger { self.init(source) }
 	
-	public init<T>(truncatingIfNeeded source: T) where T : BinaryInteger {
-		self.integer = String(source.magnitude)
-		self.negative = source < 0
-	}
+	public init<T>(truncatingIfNeeded source: T) where T : BinaryInteger { self.init(source) }
 	
-	public init<T>(clamping source: T) where T : BinaryInteger {
-		self.integer = String(source.magnitude)
-		self.negative = source < 0
-	}
+	public init<T>(clamping source: T) where T : BinaryInteger { self.init(source) }
 	
 	public init<T>(_ source: T) where T : BinaryInteger {
+		
+		if let arbit = source as? Arbit {
+			self = arbit
+			return
+		}
 		self.integer = String(source.magnitude)
 		self.negative = source < 0
 	}
 	
 	
 	public init?<T>(exactly source: T) where T : BinaryFloatingPoint {
+		guard source.isFinite else { return nil }
 		self.init(floatLiteral: Double(source))
 	}
 	
@@ -43,21 +57,79 @@ extension Arbit: BinaryInteger {
 	
 	
 	
-	// MARK: Arithmetic
+	// MARK: Bits
 	
-	public static prefix func ~ (x: Arbit) -> Arbit {
+	/// The binary digits of the absolute integer part, the most significant first
+	var magnitudeBits: String { integer.decToBin() }
+	
+	var isInteger: Bool { error == nil && fraction == nil }
+	
+	
+	/// Two's complement bits of the integer part on the given width, the least significant first.
+	/// The width must be bigger than the count of the magnitude bits.
+	func twosComplement(width: Int) -> [Bool] {
 		
-		let bit = x.asBinary()
+		var bits = magnitudeBits.reversed().map { $0 == "1" }
 		
-		let new = bit.map { b in
-			return b == "1" ? "0" : "1"
+		if bits.count < width {
+			bits += Array(repeating: false, count: width - bits.count)
 		}
 		
-		return Arbit(raw: new.joined(), negative: x.negative )
-
+		if negative { Self.negateBits(&bits) }
+		
+		return bits
+	}
+	
+	/// Builds an integer from two's complement bits, the least significant first, the last one is the sign
+	static func fromTwosComplement(_ bits: [Bool]) -> Arbit {
+		
+		var bits = bits
+		let negative = bits.last == true
+		
+		if negative { negateBits(&bits) }
+		
+		let string = String(bits.reversed().map { $0 ? "1" as Character : "0" })
+		
+		return fromScaled(string.binToDec(), scale: 0, negative: negative)
+	}
+	
+	/// Two's complement negation: invert and add one
+	private static func negateBits(_ bits: inout [Bool]) {
+		
+		var carry = true
+		
+		for i in bits.indices {
+			let inverted = !bits[i]
+			bits[i] = inverted != carry
+			carry = inverted && carry
+		}
+	}
+	
+	private static func bitwise(_ lhs: Arbit, _ rhs: Arbit, _ operation: (Bool, Bool) -> Bool) -> Arbit {
+		
+		guard lhs.isInteger, rhs.isInteger else { return .nan }
+		
+		let width = Swift.max(lhs.magnitudeBits.count, rhs.magnitudeBits.count) + 2
+		let left = lhs.twosComplement(width: width)
+		let right = rhs.twosComplement(width: width)
+		
+		return fromTwosComplement(zip(left, right).map(operation))
 	}
 	
 	
+	
+	// MARK: Arithmetic
+	
+	/// Bitwise not, in two's complement: `~x == -x - 1`
+	public static prefix func ~ (x: Arbit) -> Arbit {
+		
+		guard x.isInteger else { return .nan }
+		
+		return -x - 1
+	}
+	
+	
+	/// Remainder with the sign of the dividend, like at `Int`: `-7 % 3 == -1`. Works with fractions: `7.5 % 2 == 1.5`
 	public static func %  (lhs: Arbit, rhs: Arbit) -> Arbit {
 		let (_ , rem) = lhs.quotientAndRemainder(dividingBy: rhs)
 		return rem
@@ -67,75 +139,57 @@ extension Arbit: BinaryInteger {
 	
 	
 	
-	public static func &  (lhs: Arbit, rhs: Arbit) -> Arbit {
-		
-		func mask(_ l: Character, _ r: Character) -> Character {
-			if l == "1" && r == "1" { return "1" }
-			else                    { return "0" }
-		}
-		
-		let lhsw = Array(lhs.asBinary().reversed())
-		let rhsw = Array(rhs.asBinary().reversed())
-
-		var (short, long) : ([ReversedCollection<String>.Element], [ReversedCollection<String>.Element])
-		
-		if      lhsw.count > rhsw.count { short = rhsw ; long = lhsw }
-		else if lhsw.count < rhsw.count { short = lhsw ; long = rhsw }
-		else                            { short = lhsw ; long = rhsw }
-		
-		var new = [Character]()
-		
-		for i in 0..<short.count {
-			new.append( mask( short[i], long[i]) )
-		}
-		
-		return Arbit(bin: String(new.reversed()) )
-	}
+	public static func &  (lhs: Arbit, rhs: Arbit) -> Arbit { bitwise(lhs, rhs) { $0 && $1 } }
 	
 	public static func &= (lhs: inout Arbit, rhs: Arbit) { lhs = lhs & rhs }
 	
 	
-	
-	public static func |  (lhs: Arbit, rhs: Arbit) -> Arbit {
-		
-		func mask(_ l: Character, _ r: Character) -> Character {
-			if l == "0" && r == "0" { return "0" }
-			else                    { return "1" }
-		}
-		
-		let lhsw = Array(lhs.asBinary().reversed())
-		let rhsw = Array(rhs.asBinary().reversed())
-		
-		var (short, long) : ([ReversedCollection<String>.Element], [ReversedCollection<String>.Element])
-		
-		if      lhsw.count > rhsw.count { short = rhsw ; long = lhsw }
-		else if lhsw.count < rhsw.count { short = lhsw ; long = rhsw }
-		else                            { short = lhsw ; long = rhsw }
-		
-		var new = [Character]()
-		
-		for i in 0..<short.count {
-			new.append( mask( short[i], long[i]) )
-		}
-		
-		if short.count < long.count {
-			for i in short.count..<long.count {
-				new += String( long[i] )
-			}
-		}
-		
-		return Arbit(bin: String(new.reversed()) )
-	}
+	public static func |  (lhs: Arbit, rhs: Arbit) -> Arbit { bitwise(lhs, rhs) { $0 || $1 } }
 	
 	public static func |= (lhs: inout Arbit, rhs: Arbit) { lhs = lhs | rhs }
 	
 	
+	public static func ^  (lhs: Arbit, rhs: Arbit) -> Arbit { bitwise(lhs, rhs) { $0 != $1 } }
 	
-	public static func ^= (lhs: inout Arbit, rhs: Arbit) { fatalError() }
+	public static func ^= (lhs: inout Arbit, rhs: Arbit) { lhs = lhs ^ rhs }
 	
 	
-	public static func <<= <RHS>(lhs: inout Arbit, rhs: RHS) where RHS : BinaryInteger { fatalError() }
-	public static func >>= <RHS>(lhs: inout Arbit, rhs: RHS) where RHS : BinaryInteger { fatalError() }
+	public static func <<= <RHS>(lhs: inout Arbit, rhs: RHS) where RHS : BinaryInteger {
+		lhs = lhs.shifted(left: Int(clamping: rhs))
+	}
+	
+	public static func >>= <RHS>(lhs: inout Arbit, rhs: RHS) where RHS : BinaryInteger {
+		lhs = lhs.shifted(left: -Int(clamping: rhs))
+	}
+	
+	/// Bit shift: left is a multiplication by 2^n, right is a division rounded down (toward negative infinity)
+	private func shifted(left bits: Int) -> Arbit {
+		
+		guard isInteger else { return .nan }
+		
+		if bits == 0 || isZero { return self }
+		
+		let power = Arbit(raw: Self.magPow("2", abs(bits)))
+		
+		if bits > 0 { return self * power }
+		
+		let (quotient, remainder) = self.quotientAndRemainder(dividingBy: power)
+		
+		return (negative && !remainder.isZero) ? quotient - 1 : quotient
+	}
+	
+	
+	
+	// MARK: Mixed comparison
+	///
+	/// Without these the standard library compares by `words`, which knows only the integer part.
+	
+	public static func == <Other: BinaryInteger>(lhs: Arbit, rhs: Other) -> Bool { lhs == Arbit(rhs) }
+	public static func != <Other: BinaryInteger>(lhs: Arbit, rhs: Other) -> Bool { !(lhs == Arbit(rhs)) }
+	public static func <  <Other: BinaryInteger>(lhs: Arbit, rhs: Other) -> Bool { lhs <  Arbit(rhs) }
+	public static func <= <Other: BinaryInteger>(lhs: Arbit, rhs: Other) -> Bool { lhs <= Arbit(rhs) }
+	public static func >  <Other: BinaryInteger>(lhs: Arbit, rhs: Other) -> Bool { lhs >  Arbit(rhs) }
+	public static func >= <Other: BinaryInteger>(lhs: Arbit, rhs: Other) -> Bool { lhs >= Arbit(rhs) }
 	
 	
 	
@@ -153,16 +207,25 @@ extension Arbit: BinaryInteger {
 	
 	public var isNegative: Bool { negative }
 	
-	public var bitWidth: Int { self.integer.decToBin().count }
+	/// The bit count of the two's complement form (`words`), with the sign bit
+	public var bitWidth: Int { words.count * UInt.bitWidth }
 	
-	public var trailingZeroBitCount: Int { fatalError() }
+	public var trailingZeroBitCount: Int {
+		
+		guard isInteger, !isZero else { return bitWidth }
+		
+		return magnitudeBits.reversed().prefix(while: { $0 == "0" }).count
+	}
 	
-	public var oneBitCount: Int { fatalError() }
+	/// The count of the 1 bits in the absolute integer part
+	public var oneBitCount: Int { magnitudeBits.filter { $0 == "1" }.count }
 	
-	// TODO: !!!
-	//	public func isMultiple(of other: Self) { fatalError() }
-	//	public func isOdd() -> Bool { (self % 2) == 0 }
-	//	public func isEven() -> Bool { !isOdd() }
+	public var isOdd: Bool {
+		guard isInteger, let last = integer.last?.wholeNumberValue else { return false }
+		return last % 2 == 1
+	}
+	
+	public var isEven: Bool { isInteger && !isOdd }
 }
 
 
@@ -171,41 +234,30 @@ extension Arbit: BinaryInteger {
 // MARK: Convert & Export
 extension Arbit {
 	
+	/// Moves the decimal point: multiplies by 10^decimals
 	public mutating func shift(decimals: Int) {
 		
-		guard decimals != 0, !isZero else { return }
+		guard decimals != 0, error == nil else { return }
 		
-		var int: Substring
-		var frc: Substring?
+		let frc = fraction ?? ""
 		
 		if decimals > 0 {
 			
-			int = fraction?.prefix(decimals) ?? ""
-			if int.count < decimals { int += Substring(repeating: "0", count: decimals-int.count) }
-			if integer == "0" { integer = "" }
-			integer += String(int)
+			let padded = frc.count < decimals ? frc + String(repeating: "0", count: decimals - frc.count) : frc
 			
-			frc = fraction?.dropFirst(decimals)
-			fraction = String(frc ?? "")
+			integer += padded.prefix(decimals)
+			fraction = String(padded.dropFirst(decimals))
 			
 		} else {
 			
-			let shift = abs(decimals)
+			let shift = -decimals
+			let padded = integer.count < shift ? String(repeating: "0", count: shift - integer.count) + integer : integer
 			
-			frc = integer.suffix(shift)
-			if frc!.count < shift { frc = Substring(repeating: "0", count: shift) + frc! }
-			
-			fraction = String(frc!) + (fraction ?? "")
-			
-			fraction.cleanToNil()
-			
-			int = integer.dropLast(shift)
-			if int.isEmpty { integer = "0" } else { integer = String(int) }
-			
+			fraction = String(padded.suffix(shift)) + frc
+			integer = String(padded.dropLast(shift))
 		}
 		
-		if fraction?.isEmpty == true { fraction = nil }
-		
+		normalize()
 	}
 	
 	
@@ -220,6 +272,21 @@ extension Arbit {
 	}
 	
 	
+	public func asOctal(withPrefix: Bool = false) -> String {
+		
+		guard !self.isEmpty else { return "0o?" }
+		guard !self.isError else { return self.description }
+		
+		let oct = self.integer.decToBin()
+			.chunkedReverse(by: 3)
+			.reversed()
+			.map { String(Int($0, radix: 2) ?? 0) }
+			.joined()
+		
+		return self.sign + (withPrefix ? "0o" + oct : oct)
+	}
+	
+	
 	public func asHexadecimal(withPrefix: Bool = false) -> String {
 		
 		guard !self.isEmpty else { return "0x?" }
@@ -231,13 +298,19 @@ extension Arbit {
 	}
 	
 	
+	/// The digits of the integer part as binary coded decimals.
+	/// Packed: two digits in a byte (`1234` → `[0x12, 0x34]`, `123` → `[0x01, 0x23]`), else one digit in a byte.
 	public func asBinaryCodedDecimal(packed: Bool = true) -> [UInt8] {
 		
-		/// https://en.wikipedia.org/wiki/Double_dabble
+		/// https://en.wikipedia.org/wiki/Binary-coded_decimal
 		
-		return self.integer
-			.chunked(by: packed ? 2 : 1)
-			.map { UInt8($0)! }
+		var digits = self.integer.utf8.map { $0 - 48 }
+		
+		guard packed else { return digits }
+		
+		if digits.count % 2 == 1 { digits.insert(0, at: 0) }
+		
+		return stride(from: 0, to: digits.count, by: 2).map { digits[$0] << 4 | digits[$0 + 1] }
 	}
 	
 }
@@ -400,9 +473,30 @@ extension String {
 		return string
 	}
 	
-	public func hexToDec() -> String { fatalError() } // TODO: Implement
+	public func hexToDec() -> String { hexToBin().binToDec() }
 	
-	public func hexToBin() -> String { fatalError() } // TODO: Implement
+	/// Four bits for every hexadecimal digit, "0x?" for an invalid digit
+	public func hexToBin() -> String { digitsToBin(bitsPerDigit: 4) }
+	
+	public func octToDec() -> String { octToBin().binToDec() }
+	
+	/// Three bits for every octal digit, "0o?" for an invalid digit
+	public func octToBin() -> String { digitsToBin(bitsPerDigit: 3) }
+	
+	private func digitsToBin(bitsPerDigit: Int) -> String {
+		
+		var bits = ""
+		
+		for chr in self {
+			guard let value = chr.hexDigitValue, value < (1 << bitsPerDigit) else {
+				return bitsPerDigit == 4 ? "0x?" : "0o?"
+			}
+			let bin = String(value, radix: 2)
+			bits += String(repeating: "0", count: bitsPerDigit - bin.count) + bin
+		}
+		
+		return bits
+	}
 	
 }
 
