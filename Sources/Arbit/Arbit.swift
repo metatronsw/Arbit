@@ -548,6 +548,14 @@ extension Arbit: ExpressibleByStringLiteral, LosslessStringConvertible {
 
 }
 
+// TODO: stride szélső esetek – vigyázni kell, később foglalkozni vele !
+//
+// A `stride(from:to:by:)` a Swift standard könyvtáráé, két esetben nem tudunk beleszólni:
+//  - `nan` kezdő- vagy végpont: a sorozat SOHA nem ér véget (minden összehasonlítás hamis)
+//  - nulla lépésköz: a program megáll ("Stride size must not be zero")
+// A `Double` ugyanígy viselkedik. Megoldás lehet egy saját `Arbit.stride(...)`,
+// ami ilyenkor hibát dob vagy üres sorozatot ad. Az `inf` végpont szándékosan végtelen sorozat.
+//
 extension Arbit: Strideable {
 
 	public typealias Stride = Arbit

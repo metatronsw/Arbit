@@ -12,7 +12,7 @@ swift test --filter Test_Functions/test_Against_References
 swift run Run          # Run/main.swift – kézi próbálgató, nem része a könyvtárnak
 ```
 
-Swift 5.9+ kell. Állapot (2026-11-24): 103 teszt, mind zöld, fordítási figyelmeztetés nincs.
+Swift 5.9+ kell. Állapot (2026-11-24): 110 teszt, mind zöld, fordítási figyelmeztetés nincs.
 
 ## Felépítés
 
@@ -105,6 +105,9 @@ Ezeket ne változtasd meg kérdezés nélkül.
 
 ## Ami még nincs kész
 
+- **`stride` szélső esetei** (TODO az `Arbit.swift`-ben a `Strideable` felett): `nan` kezdő- vagy végponttal
+  a sorozat soha nem ér véget, nulla lépésközzel a program megáll. A standard könyvtár viselkedése;
+  saját `Arbit.stride(...)` kellene, ami hibát dob vagy üres sorozatot ad. A tulajdonos későbbre tette.
 - A `karatsuba` megvan és tesztelt, de a `*` nem használja (a tulajdonos szerint most nem fontos).
 - A sorfejtéses függvények 1000 jegy felett lassulnak (`sin` 1000 jegyre ~0,1–0,3 s), mert π-t az
   állandó hosszán túl Machin-képlettel újraszámolják, gyorsítótár nélkül (nincs megosztott állapot).
