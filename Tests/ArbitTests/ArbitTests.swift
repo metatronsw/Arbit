@@ -266,15 +266,11 @@ final class Test_Arbit: XCTestCase {
 	
 	func test_Output_Limited() throws {
 		
-		let oldSep = T.decSep
-		T.decSep = "."
-		defer { T.decSep = oldSep }
-		
-		XCTAssertEqual( T(0).limited(), "0")
-		XCTAssertEqual( T(1_000).limited(), "1000")
-		XCTAssertEqual( T(922_337_203_685_475).limited(), "9223_(7)_5475")
-		XCTAssertEqual( T("1_000.001").limited(), "1000.001")
-		XCTAssertEqual( T("1_000_000_000_000_000_000_000_000.000000000000000000001").limited(), "1000_(17)_0000.0000_(13)_0001")
+		XCTAssertEqual( T(0).limited(decimalSeparator: "."), "0")
+		XCTAssertEqual( T(1_000).limited(decimalSeparator: "."), "1000")
+		XCTAssertEqual( T(922_337_203_685_475).limited(decimalSeparator: "."), "9223_(7)_5475")
+		XCTAssertEqual( T("1_000.001").limited(decimalSeparator: "."), "1000.001")
+		XCTAssertEqual( T("1_000_000_000_000_000_000_000_000.000000000000000000001").limited(decimalSeparator: "."), "1000_(17)_0000.0000_(13)_0001")
 		
 		XCTAssertEqual( T(1000).limited(3), "10_(1)_0")
 		XCTAssertEqual( T(12345_67890_12345).limited(4), "12_(11)_45")
@@ -612,45 +608,41 @@ final class Test_Math_Basic: XCTestCase {
 	
 	func test_Basic_Div() throws{
 		
-		let old = Arbit.precision
-		Arbit.precision = 10
-		defer { Arbit.precision = old }
+		let ctx = T.Context.digits(10)
 		
 		
-		XCTAssertEqual( (T(0) / T(0)).description,  Arbit.nan.description)
-		XCTAssertEqual( (T(1) / T(0)).description,  Arbit.nan.description)
+		XCTAssertEqual( (T(0).divided(by: T(0), ctx)).description,  Arbit.nan.description)
+		XCTAssertEqual( (T(1).divided(by: T(0), ctx)).description,  Arbit.nan.description)
 		
-		XCTAssertEqual( T(0) / T(1),  .zero)
-		XCTAssertEqual( T(0) / T(-1), .zero)
+		XCTAssertEqual( T(0).divided(by: T(1), ctx),  .zero)
+		XCTAssertEqual( T(0).divided(by: T(-1), ctx), .zero)
 		
-		XCTAssertEqual( T(1) / T(1),    1)
-		XCTAssertEqual( T(1) / T(-1),  -1)
-		XCTAssertEqual( T(-1) / T(1),  -1)
-		XCTAssertEqual( T(-1) / T(-1),  1)
+		XCTAssertEqual( T(1).divided(by: T(1), ctx),    1)
+		XCTAssertEqual( T(1).divided(by: T(-1), ctx),  -1)
+		XCTAssertEqual( T(-1).divided(by: T(1), ctx),  -1)
+		XCTAssertEqual( T(-1).divided(by: T(-1), ctx),  1)
 		
-		XCTAssertEqual( T(3) / T(3), 1)
-		XCTAssertEqual( T(9) / T(9), 1)
+		XCTAssertEqual( T(3).divided(by: T(3), ctx), 1)
+		XCTAssertEqual( T(9).divided(by: T(9), ctx), 1)
 		
-		XCTAssertEqual( T(100) / T(1),   "100")
-		XCTAssertEqual( T(100) / T(10),   "10")
-		XCTAssertEqual( T(100) / T(100),   "1")
-		XCTAssertEqual( T(100) / T(1000),  "0.1")
-		XCTAssertEqual( T(100) / T(10000), "0.01")
+		XCTAssertEqual( T(100).divided(by: T(1), ctx),   "100")
+		XCTAssertEqual( T(100).divided(by: T(10), ctx),   "10")
+		XCTAssertEqual( T(100).divided(by: T(100), ctx),   "1")
+		XCTAssertEqual( T(100).divided(by: T(1000), ctx),  "0.1")
+		XCTAssertEqual( T(100).divided(by: T(10000), ctx), "0.01")
 		
-		XCTAssertEqual( T(56) / T(7), 8)
-		XCTAssertEqual( T(279_591) / T(871), 321)
+		XCTAssertEqual( T(56).divided(by: T(7), ctx), 8)
+		XCTAssertEqual( T(279_591).divided(by: T(871), ctx), 321)
 		
-		XCTAssertEqual( T(4) / T(5),  "0.8")
+		XCTAssertEqual( T(4).divided(by: T(5), ctx),  "0.8")
 		
-		XCTAssertEqual( T(4) / T(3),  "1.3333333333")
-		XCTAssertEqual( T(16) / T(9), "1.7777777777")
+		XCTAssertEqual( T(4).divided(by: T(3), ctx),  "1.3333333333")
+		XCTAssertEqual( T(16).divided(by: T(9), ctx), "1.7777777777")
 	}
 	
 	func test_Basic_Random() throws {
 		
-		let old = Arbit.precision
-		Arbit.precision = 10
-		defer { Arbit.precision = old }
+		let ctx = T.Context.digits(10)
 		
 		for _ in 1...iteration {
 			
@@ -677,7 +669,7 @@ final class Test_Math_Basic: XCTestCase {
 			let decMul = (lhsDec * rhsDec).description
 			XCTAssertEqual( tMul, decMul, "\(lhsT) * \(rhsT)" )
 			
-			XCTAssertEqual( lhsT / rhsT, truncated(lhsDec / rhsDec, Arbit.precision), "\(lhsT) / \(rhsT)" )
+			XCTAssertEqual( lhsT.divided(by: rhsT, ctx), truncated(lhsDec / rhsDec, ctx.digits), "\(lhsT) / \(rhsT)" )
 			
 //			print("RND»", lhsDec, ":", rhsDec,"(+-*/)", decAdd, decSub, decMul, decDiv)
 //			print("RND»", lhsT, ":", rhsT,"(+-*/)", tAdd, tSub, tMul, tDiv)
@@ -823,64 +815,60 @@ final class Test_Math_Fraction: XCTestCase {
 	
 	func test_Fract_Div() throws {
 		
-		let old = T.precision
-		T.precision = 10
-		defer { T.precision = old }
+		let ctx = T.Context.digits(10)
 		
-		XCTAssertEqual( (T("1.0") / T("0")).description, T.nan.description)
-		XCTAssertEqual( (T("1.1") / T("0")).description, T.nan.description)
+		XCTAssertEqual( (T("1.0").divided(by: T("0"), ctx)).description, T.nan.description)
+		XCTAssertEqual( (T("1.1").divided(by: T("0"), ctx)).description, T.nan.description)
 		
-		XCTAssertEqual( T("0") / T("0.001"), "0")
-		XCTAssertEqual( T("0") / T("1.001"), "0")
+		XCTAssertEqual( T("0").divided(by: T("0.001"), ctx), "0")
+		XCTAssertEqual( T("0").divided(by: T("1.001"), ctx), "0")
 		
-		XCTAssertEqual( T("2.6") / T("1.3"),   "2")
-		XCTAssertEqual( T("2.6") / T("-1.3"), "-2")
-		XCTAssertEqual( T("-2.6") / T("1.3"), "-2")
-		XCTAssertEqual( T("-2.6") / T("-1.3"), "2")
+		XCTAssertEqual( T("2.6").divided(by: T("1.3"), ctx),   "2")
+		XCTAssertEqual( T("2.6").divided(by: T("-1.3"), ctx), "-2")
+		XCTAssertEqual( T("-2.6").divided(by: T("1.3"), ctx), "-2")
+		XCTAssertEqual( T("-2.6").divided(by: T("-1.3"), ctx), "2")
 	
-		XCTAssertEqual( T("1")  / T("0.1"),    "10")
-		XCTAssertEqual( T("1")  / T("0.01"),   "100")
-		XCTAssertEqual( T("1")  / T("0.001"),  "1000")
+		XCTAssertEqual( T("1").divided(by: T("0.1"), ctx),    "10")
+		XCTAssertEqual( T("1").divided(by: T("0.01"), ctx),   "100")
+		XCTAssertEqual( T("1").divided(by: T("0.001"), ctx),  "1000")
 		
-		XCTAssertEqual( T("10") / T("0.1"),    "100")
-		XCTAssertEqual( T("10") / T("0.01"),   "1000")
-		XCTAssertEqual( T("10") / T("0.001"),  "10000")
+		XCTAssertEqual( T("10").divided(by: T("0.1"), ctx),    "100")
+		XCTAssertEqual( T("10").divided(by: T("0.01"), ctx),   "1000")
+		XCTAssertEqual( T("10").divided(by: T("0.001"), ctx),  "10000")
 		
-		XCTAssertEqual( T("1234") / T("0.1234"), "10000")
-		XCTAssertEqual( T("1234") / T("1.234"),  "1000")
-		XCTAssertEqual( T("1234") / T("12.34"),  "100")
-		XCTAssertEqual( T("1234") / T("123.4"),  "10")
+		XCTAssertEqual( T("1234").divided(by: T("0.1234"), ctx), "10000")
+		XCTAssertEqual( T("1234").divided(by: T("1.234"), ctx),  "1000")
+		XCTAssertEqual( T("1234").divided(by: T("12.34"), ctx),  "100")
+		XCTAssertEqual( T("1234").divided(by: T("123.4"), ctx),  "10")
 		
-		XCTAssertEqual( T("0.1234") / T("1234"), "0.0001")
-		XCTAssertEqual( T("1.234")  / T("1234"), "0.001")
-		XCTAssertEqual( T("12.34")  / T("1234"), "0.01")
-		XCTAssertEqual( T("123.4")  / T("1234"), "0.1")
+		XCTAssertEqual( T("0.1234").divided(by: T("1234"), ctx), "0.0001")
+		XCTAssertEqual( T("1.234").divided(by: T("1234"), ctx), "0.001")
+		XCTAssertEqual( T("12.34").divided(by: T("1234"), ctx), "0.01")
+		XCTAssertEqual( T("123.4").divided(by: T("1234"), ctx), "0.1")
 		
 		
-		XCTAssertEqual( T("7.2") / T("24"), "0.3")
-		XCTAssertEqual( T("72") / T("2.4"), "30")
+		XCTAssertEqual( T("7.2").divided(by: T("24"), ctx), "0.3")
+		XCTAssertEqual( T("72").divided(by: T("2.4"), ctx), "30")
 		
-		XCTAssertEqual( T("14.2") / T("4"), "3.55")
-		XCTAssertEqual( T("14.4") / T("4"), "3.6")
-		XCTAssertEqual( T("524.8") / T("4"), "131.2")
-		XCTAssertEqual( T("2818.8") / T("8"), "352.35")
+		XCTAssertEqual( T("14.2").divided(by: T("4"), ctx), "3.55")
+		XCTAssertEqual( T("14.4").divided(by: T("4"), ctx), "3.6")
+		XCTAssertEqual( T("524.8").divided(by: T("4"), ctx), "131.2")
+		XCTAssertEqual( T("2818.8").divided(by: T("8"), ctx), "352.35")
 		
-		XCTAssertEqual( T("8") / T("2.5"), "3.2")
-		XCTAssertEqual( T("18") / T("2.5"), "7.2")
-		XCTAssertEqual( T("782") / T("8.5"), "92")
-		XCTAssertEqual( T("8448") / T("4.8"), "1760")
+		XCTAssertEqual( T("8").divided(by: T("2.5"), ctx), "3.2")
+		XCTAssertEqual( T("18").divided(by: T("2.5"), ctx), "7.2")
+		XCTAssertEqual( T("782").divided(by: T("8.5"), ctx), "92")
+		XCTAssertEqual( T("8448").divided(by: T("4.8"), ctx), "1760")
 		
-		XCTAssertEqual( T("8.84") / T("2.6"), "3.4")
-		XCTAssertEqual( T("1236.82") / T("3.2"), "386.50625")
-		XCTAssertEqual( T("2453.4638") / T("43.21"), "56.78")
+		XCTAssertEqual( T("8.84").divided(by: T("2.6"), ctx), "3.4")
+		XCTAssertEqual( T("1236.82").divided(by: T("3.2"), ctx), "386.50625")
+		XCTAssertEqual( T("2453.4638").divided(by: T("43.21"), ctx), "56.78")
 		
 	}
 	
 	func test_Fract_Random() throws {
 		
-		let old = Arbit.precision
-		Arbit.precision = 3
-		defer { Arbit.precision = old }
+		let ctx = T.Context.digits(3)
 		
 		
 		for _ in 1...iteration {
@@ -911,7 +899,7 @@ final class Test_Math_Fraction: XCTestCase {
 			let decMul = (lhsDec * rhsDec).description
 			XCTAssertEqual( tMul, decMul, "\(lhsT) * \(rhsT)" )
 //
-			XCTAssertEqual( lhsT / rhsT, truncated(lhsDec / rhsDec, Arbit.precision), "\(lhsT) / \(rhsT)" )
+			XCTAssertEqual( lhsT.divided(by: rhsT, ctx), truncated(lhsDec / rhsDec, ctx.digits), "\(lhsT) / \(rhsT)" )
 			
 		}
 	}
@@ -1180,51 +1168,47 @@ final class Test_Math_Long: XCTestCase {
 	
 	func test_Long_Div() throws {
 		
-		let old = Arbit.precision
-		Arbit.precision = 20
-		defer { Arbit.precision = old }
+		var ctx = T.Context.digits(20)
 		
-		XCTAssertEqual( T("1234567890123456789012345678901234567890") / T("12"),   "102880657510288065751028806575102880657.5")
-		XCTAssertEqual( T("1234567890123456789012345678901234567890") / T("-12"), "-102880657510288065751028806575102880657.5")
+		XCTAssertEqual( T("1234567890123456789012345678901234567890").divided(by: T("12"), ctx),   "102880657510288065751028806575102880657.5")
+		XCTAssertEqual( T("1234567890123456789012345678901234567890").divided(by: T("-12"), ctx), "-102880657510288065751028806575102880657.5")
 
-		XCTAssertEqual( T("1234567890123456789012345678901234567890") / T("1234567890"),  "1000000000100000000010000000001")
+		XCTAssertEqual( T("1234567890123456789012345678901234567890").divided(by: T("1234567890"), ctx),  "1000000000100000000010000000001")
 		
-		XCTAssertEqual( T("1234567890123456789") / T("12.5"),  "98765431209876543.12")
-		XCTAssertEqual( T("1.234567890123456789") / T("12.5"),  "0.09876543120987654312")
-		XCTAssertEqual( T("123456789.0123456789") / T("12.5"),  "9876543.120987654312")
-		XCTAssertEqual( T("123456789012345678.9") / T("12.5"),  "9876543120987654.312")
+		XCTAssertEqual( T("1234567890123456789").divided(by: T("12.5"), ctx),  "98765431209876543.12")
+		XCTAssertEqual( T("1.234567890123456789").divided(by: T("12.5"), ctx),  "0.09876543120987654312")
+		XCTAssertEqual( T("123456789.0123456789").divided(by: T("12.5"), ctx),  "9876543.120987654312")
+		XCTAssertEqual( T("123456789012345678.9").divided(by: T("12.5"), ctx),  "9876543120987654.312")
 		
 		/// The result is cut at the precision
-		Arbit.precision = 10
-		XCTAssertEqual( T("1.234567890123456789") / T("12.5"),  "0.0987654312")
-		XCTAssertEqual( T("123456789.0123456789") / T("12.5"),  "9876543.1209876543")
+		ctx = .digits(10)
+		XCTAssertEqual( T("1.234567890123456789").divided(by: T("12.5"), ctx),  "0.0987654312")
+		XCTAssertEqual( T("123456789.0123456789").divided(by: T("12.5"), ctx),  "9876543.1209876543")
 		
 		
 		/// Long - Long div
 		
-		Arbit.precision = 20
-		XCTAssertEqual( T("1234567890123456789012345678901234567890") / T("12345678901234567890"),  "100000000000000000001")
-		XCTAssertEqual( T("1234567890123456789012345678901234567890") / T("-12345678901234567890"),  "-100000000000000000001")
-		XCTAssertEqual( T("1000000000000000000000000000000000000000") / T("3000000000000000000000000000000"),  "333333333.33333333333333333333")
-		XCTAssertEqual( T("100000000000000000000") / T("900000000000000000"),  "111.11111111111111111111")
+		ctx = .digits(20)
+		XCTAssertEqual( T("1234567890123456789012345678901234567890").divided(by: T("12345678901234567890"), ctx),  "100000000000000000001")
+		XCTAssertEqual( T("1234567890123456789012345678901234567890").divided(by: T("-12345678901234567890"), ctx),  "-100000000000000000001")
+		XCTAssertEqual( T("1000000000000000000000000000000000000000").divided(by: T("3000000000000000000000000000000"), ctx),  "333333333.33333333333333333333")
+		XCTAssertEqual( T("100000000000000000000").divided(by: T("900000000000000000"), ctx),  "111.11111111111111111111")
 		
-		Arbit.precision = 50
-		XCTAssertEqual( T("12") / T("1234567890123456789012345678901234567890"),  "0.00000000000000000000000000000000000000972000008748")
-		XCTAssertEqual( T("1") / T("100000000000000000000"),  "0.00000000000000000001")
-		XCTAssertEqual( T("1") / T("5000000000000000000"),  "0.0000000000000000002")
+		ctx = .digits(50)
+		XCTAssertEqual( T("12").divided(by: T("1234567890123456789012345678901234567890"), ctx),  "0.00000000000000000000000000000000000000972000008748")
+		XCTAssertEqual( T("1").divided(by: T("100000000000000000000"), ctx),  "0.00000000000000000001")
+		XCTAssertEqual( T("1").divided(by: T("5000000000000000000"), ctx),  "0.0000000000000000002")
 		
 		/// Smaller than the precision: clean zero
-		Arbit.precision = 16
-		XCTAssertEqual( (T("1") / T("5000000000000000000")).description,  "0")
-		XCTAssertTrue( (T("-1") / T("5000000000000000000")).isZero )
-		XCTAssertFalse( (T("-1") / T("5000000000000000000")).isNegative )
+		ctx = .digits(16)
+		XCTAssertEqual( (T("1").divided(by: T("5000000000000000000"), ctx)).description,  "0")
+		XCTAssertTrue( (T("-1").divided(by: T("5000000000000000000"), ctx)).isZero )
+		XCTAssertFalse( (T("-1").divided(by: T("5000000000000000000"), ctx)).isNegative )
 	}
 	
 	func test_Long_Random() throws {
 		
-		let old = Arbit.precision
-		Arbit.precision = 10
-		defer { Arbit.precision = old }
+		let ctx = T.Context.digits(10)
 		
 		
 		for _ in 1...iteration {
@@ -1257,7 +1241,7 @@ final class Test_Math_Long: XCTestCase {
 			let decMul = (lhsDec * rhsDec).description
 			XCTAssertEqual( String(tMul.prefix(decMul.count-1)), String(decMul.dropLast()) )
 			
-			XCTAssertEqual( lhsT / rhsT, truncated(lhsDec / rhsDec, Arbit.precision), "\(lhsT) / \(rhsT)" )
+			XCTAssertEqual( lhsT.divided(by: rhsT, ctx), truncated(lhsDec / rhsDec, ctx.digits), "\(lhsT) / \(rhsT)" )
 			
 		}
 	}

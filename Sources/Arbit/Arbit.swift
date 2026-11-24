@@ -2,7 +2,7 @@ import Foundation
 
 /// Lossless, arbitrary precision number structure supporting decimal fractions
 ///
-public struct Arbit {
+public struct Arbit: Sendable {
 
 	public var integer: String
 	public var fraction: String?
@@ -10,15 +10,11 @@ public struct Arbit {
 	public var error: Errors?
 
 
-	/// Number of fraction digits calculated by division and roots
-	public static var precision = 16
+	/// The decimal separator of the current locale
+	public static var decSep: String { Locale.current.decimalSeparator ?? "." }
 
-	/// How the last calculated fraction digit is handled by division, roots and `rounded()`
-	public static var rounding: RoundingMode = .truncate
-
-
-	public static var decSep = Locale.current.decimalSeparator ?? "."
-	public static var groupSep = Locale.current.groupingSeparator ?? "\u{2008}"
+	/// The grouping separator of the current locale
+	public static var groupSep: String { Locale.current.groupingSeparator ?? "\u{2008}" }
 
 
 
@@ -71,12 +67,11 @@ public struct Arbit {
 extension Arbit {
 
 	/// Arbit error cases
-	public enum Errors: CustomStringConvertible, Comparable, Hashable {
+	public enum Errors: CustomStringConvertible, Comparable, Hashable, Sendable {
 
 		case empty
 		case infinity
 		case nan
-		case calcError(String) // FIXME: csak Debughoz ! !
 
 
 		public var description: String {
@@ -84,13 +79,40 @@ extension Arbit {
 				case .empty: "Not initialised!"
 				case .infinity: "Infinity number!"
 				case .nan: "Not a number!"
-				case let .calcError(error): "≠ \(error)"
 			}
 		}
 	}
 
+	/// The settings of the operations that cannot be exact: division, roots, logarithm, trigonometry...
+	///
+	/// There is no global setting, the context travels as a parameter:
+	/// ```
+	/// a.divided(by: b, .digits(50))
+	/// a.sqrRoot(Arbit.Context(digits: 50, rounding: .halfUp))
+	/// ```
+	/// Without the parameter (and at the `/` operator) the `standard` context is used: 16 digits, truncated.
+	public struct Context: Hashable, Sendable {
+
+		/// The count of the calculated fraction digits
+		public var digits: Int
+
+		/// The handling of the last digit
+		public var rounding: RoundingMode
+
+		public init(digits: Int = 16, rounding: RoundingMode = .truncate) {
+			self.digits = digits
+			self.rounding = rounding
+		}
+
+		/// 16 fraction digits, truncated
+		public static let standard = Context()
+
+		/// The given count of fraction digits, truncated
+		public static func digits(_ digits: Int) -> Context { Context(digits: digits) }
+	}
+
 	/// The handling of the last kept fraction digit
-	public enum RoundingMode {
+	public enum RoundingMode: Hashable, Sendable {
 		/// Cut the remaining digits: 0.666… → 0.66
 		case truncate
 		/// Round half away from zero: 0.666… → 0.67, 0.125 → 0.13
@@ -112,17 +134,8 @@ extension Arbit {
 
 
 
-	public func errorHandle(_ error: Errors) -> String {
-
-		if case let .calcError(e) = error { return "ERROR ≠ \nArbit  : \(self.whole) \nDecimal: \(e)"}
-		else { return error.description }
-	}
-
 	/// Human readable explanation of the error value, nil for a valid number
-	public var errorDescription: String? {
-		guard let error else { return nil }
-		return errorHandle(error)
-	}
+	public var errorDescription: String? { error?.description }
 
 }
 
@@ -137,12 +150,18 @@ extension Arbit {
 
 		guard error == nil else { return }
 
-		if integer.first == "0", integer.utf8.count > 1 {
-			integer = String(integer.drop(while: { $0 == "0" }))
-		}
-		if integer.isEmpty { integer = "0" }
+		integer = Self.trimZeros(integer)
 
-		fraction.cleanToNil()
+		if let frc = fraction {
+			/// Cut the trailing zeros
+			let bytes = frc.utf8
+			if let last = bytes.lastIndex(where: { $0 != 48 }) {
+				let end = bytes.index(after: last)
+				if end != bytes.endIndex { fraction = String(frc[..<end]) }
+			} else {
+				fraction = nil
+			}
+		}
 
 		if fraction == nil, integer == "0" { negative = false }
 	}
@@ -153,7 +172,10 @@ extension Arbit {
 	func scaled(to scale: Int) -> String {
 
 		let frc = fraction ?? ""
-		let whole = integer + frc + String(repeating: "0", count: Swift.max(0, scale - frc.count))
+		let padding = scale - frc.utf8.count
+
+		var whole = integer == "0" ? frc : integer + frc
+		if padding > 0 { whole += String(repeating: "0", count: padding) }
 
 		return Self.trimZeros(whole)
 	}
@@ -168,10 +190,11 @@ extension Arbit {
 			result = Arbit(raw: magnitude, negative: negative)
 		} else {
 			var digits = magnitude
-			if digits.count <= scale {
-				digits = String(repeating: "0", count: scale - digits.count + 1) + digits
+			let count = digits.utf8.count
+			if count <= scale {
+				digits = String(repeating: "0", count: scale - count + 1) + digits
 			}
-			let cut = digits.index(digits.endIndex, offsetBy: -scale)
+			let cut = digits.utf8.index(digits.utf8.endIndex, offsetBy: -scale)
 			result = Arbit(raw: String(digits[..<cut]), String(digits[cut...]), negative: negative)
 		}
 
@@ -183,11 +206,17 @@ extension Arbit {
 	/// Removes the leading zeros of a digit string, "0" at least
 	static func trimZeros(_ digits: String) -> String {
 
-		guard digits.first == "0" else { return digits.isEmpty ? "0" : digits }
+		let bytes = digits.utf8
 
-		let trimmed = digits.drop(while: { $0 == "0" })
-		return trimmed.isEmpty ? "0" : String(trimmed)
+		guard bytes.first == 48 else { return digits.isEmpty ? "0" : digits }
+
+		guard let first = bytes.firstIndex(where: { $0 != 48 }) else { return "0" }
+
+		return String(digits[first...])
 	}
+
+	/// The count of the fraction digits
+	var scale: Int { fraction?.utf8.count ?? 0 }
 
 }
 
@@ -203,7 +232,6 @@ extension Arbit: CustomStringConvertible, CustomDebugStringConvertible {
 				case .nan: return "nan"
 				case .infinity: return negative ? "-inf" : "inf"
 				case .empty: return "empty"
-				case .calcError: return errorHandle(error)
 			}
 		}
 		return "\(sign)\(absolute)"
@@ -240,7 +268,7 @@ extension Arbit: CustomStringConvertible, CustomDebugStringConvertible {
 
 	/// The integer part, if it fits into Int
 	public var asInt: Int? {
-		guard error == nil else { return nil }
+		guard error == nil, integer.utf8.count <= 19 else { return nil }
 		return Int("\(sign)\(integer)")
 	}
 
@@ -389,6 +417,7 @@ extension Arbit: ExpressibleByStringLiteral, LosslessStringConvertible {
 
 		switch description.lowercased() {
 			case "nan": self.init(error: .nan) ; return
+			case "empty": self.init(error: .empty) ; return
 			case "inf", "+inf", "infinity", "+infinity": self.init(error: .infinity) ; return
 			case "-inf", "-infinity": self.init(negative: true, error: .infinity) ; return
 			default: break
@@ -515,18 +544,6 @@ extension Arbit: ExpressibleByStringLiteral, LosslessStringConvertible {
 		}
 
 		return (bits.binToDec(), negative)
-	}
-
-}
-
-extension Arbit: SignedInteger {
-
-	public typealias Magnitude = Arbit
-
-	public var magnitude: Arbit {
-		var abs = self
-		abs.negative = false
-		return abs
 	}
 
 }
@@ -676,14 +693,14 @@ extension Arbit {
 	}
 
 
-	public func limited(_ limit: Int = 8) -> String {
+	public func limited(_ limit: Int = 8, decimalSeparator: String = Self.decSep) -> String {
 
 		if error != nil { return description }
 
 		let int = sign + Self.getLimited(integer, limit: limit)
 
 		guard let fraction else { return int }
-		return int + Self.decSep + Self.getLimited(fraction, limit: limit)
+		return int + decimalSeparator + Self.getLimited(fraction, limit: limit)
 
 	}
 
@@ -737,5 +754,62 @@ extension Arbit {
 
 
 		return (numbers: sign + first + after, e: n)
+	}
+
+
+	/// Scientific notation: one digit before the decimal point and the power of ten, like `1.2345e4` or `-1.23e-3`.
+	/// The significant digits can be limited (rounded by the mode). The result can be parsed back by `Arbit(String)`.
+	public func scientific(significant: Int? = nil, rounding: RoundingMode = .truncate) -> String {
+
+		guard error == nil else { return description }
+		guard !isZero else { return "0e0" }
+
+		/// The exponent of the first significant digit
+		var exponent: Int
+
+		if integer != "0" {
+			exponent = integer.count - 1
+		} else {
+			exponent = -((fraction ?? "").prefix(while: { $0 == "0" }).count + 1)
+		}
+
+		var mantissa = self.magnitude
+		mantissa.shift(decimals: -exponent)
+
+		if let significant, significant > 0 {
+			mantissa = mantissa.rounded(Context(digits: significant - 1, rounding: rounding))
+
+			if mantissa.integer.count > 1 { // 9.99 → 10.0
+				mantissa.shift(decimals: -1)
+				exponent += 1
+			}
+		}
+
+		return "\(sign)\(mantissa.absolute)e\(exponent)"
+	}
+}
+
+
+
+// MARK: Codable
+///
+/// Coded as a single string, the same as the `description`: "-12.5", "nan", "inf"
+///
+extension Arbit: Codable {
+
+	public init(from decoder: Decoder) throws {
+
+		let container = try decoder.singleValueContainer()
+		let string = try container.decode(String.self)
+
+		guard let value = Arbit(string) else {
+			throw DecodingError.dataCorruptedError(in: container, debugDescription: "'\(string)' is not an Arbit number")
+		}
+		self = value
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.singleValueContainer()
+		try container.encode(description)
 	}
 }

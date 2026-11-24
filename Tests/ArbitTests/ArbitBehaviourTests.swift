@@ -66,26 +66,12 @@ func assertCanonical(_ value: T, _ message: String = "", file: StaticString = #f
 	}
 }
 
-/// Saves and restores the global settings around every test
-class ArbitTestCase: XCTestCase {
+/// There are no global settings any more, the precision travels as a parameter
+class ArbitTestCase: XCTestCase {}
 
-	private var savedPrecision = 16
-	private var savedRounding = Arbit.RoundingMode.truncate
-
-	override func setUp() {
-		super.setUp()
-		savedPrecision = Arbit.precision
-		savedRounding = Arbit.rounding
-		Arbit.precision = 16
-		Arbit.rounding = .truncate
-	}
-
-	override func tearDown() {
-		Arbit.precision = savedPrecision
-		Arbit.rounding = savedRounding
-		super.tearDown()
-	}
-}
+/// Shorthands for the contexts
+func halfUp(_ digits: Int) -> T.Context { T.Context(digits: digits, rounding: .halfUp) }
+func halfEven(_ digits: Int) -> T.Context { T.Context(digits: digits, rounding: .halfEven) }
 
 
 
@@ -179,6 +165,16 @@ final class Test_Compare: ArbitTestCase {
 		XCTAssertTrue ( A("5.5") >= five )
 		XCTAssertTrue ( A("4.5") < five )
 		XCTAssertTrue ( A("-4.5") <= five )
+		
+		/// The integer on the left side
+		XCTAssertTrue ( five == T(5) )
+		XCTAssertFalse( five == A("5.5") )
+		XCTAssertTrue ( five != A("5.5") )
+		XCTAssertTrue ( five < A("5.5") )
+		XCTAssertTrue ( five <= T(5) )
+		XCTAssertTrue ( five > A("4.5") )
+		XCTAssertTrue ( five >= A("-4.5") )
+		XCTAssertTrue ( UInt8(200) < A("200.5") )
 	}
 }
 
@@ -237,7 +233,9 @@ final class Test_Signs: ArbitTestCase {
 		XCTAssertEqual( abs(T(-5)), 5 )
 		XCTAssertEqual( T(-5).magnitude, 5 )
 		XCTAssertEqual( A("-0.5").signum(), -1 )
+		XCTAssertEqual( A("0.5").signum(), 1 )
 		XCTAssertEqual( T(0).signum(), 0 )
+		XCTAssertTrue ( T.nan.signum().isNaN )
 	}
 
 	func test_Random_Against_Decimal() throws {
@@ -525,35 +523,39 @@ final class Test_Parsing: ArbitTestCase {
 final class Test_Division: ArbitTestCase {
 
 	func test_Precision() throws {
-
-		Arbit.precision = 0
-		XCTAssertEqual( (T(7) / T(2)).description, "3" )
-		XCTAssertEqual( (T(-7) / T(2)).description, "-3" )
-		XCTAssertEqual( (T(1) / T(3)).description, "0" )
-
-		Arbit.precision = 1
-		XCTAssertEqual( (T(7) / T(2)).description, "3.5" )
-		XCTAssertEqual( (T(1) / T(3)).description, "0.3" )
-
-		Arbit.precision = 16
+		
+		func divide(_ l: T, _ r: T, _ digits: Int) -> String { l.divided(by: r, .digits(digits)).description }
+		
+		XCTAssertEqual( divide(7, 2, 0), "3" )
+		XCTAssertEqual( divide(-7, 2, 0), "-3" )
+		XCTAssertEqual( divide(1, 3, 0), "0" )
+		
+		XCTAssertEqual( divide(7, 2, 1), "3.5" )
+		XCTAssertEqual( divide(1, 3, 1), "0.3" )
+		
+		/// The operator and the missing parameter is the standard context: 16 digits, truncated
 		XCTAssertEqual( (T(1) / T(3)).description, "0.3333333333333333" )
 		XCTAssertEqual( (T(2) / T(3)).description, "0.6666666666666666" )
-		XCTAssertEqual( (T(1) / T(7)).description, "0.1428571428571428" )
+		XCTAssertEqual( T(1).divided(by: 7).description, "0.1428571428571428" )
 		XCTAssertEqual( (T(1) / T(8)).description, "0.125" )
-
-		Arbit.precision = 50
-		XCTAssertEqual( (T(1) / T(7)).description, "0.14285714285714285714285714285714285714285714285714" )
-		XCTAssertEqual( (T(22) / T(7)).description, "3.14285714285714285714285714285714285714285714285714" )
+		XCTAssertEqual( T.Context.standard, T.Context(digits: 16, rounding: .truncate) )
+		
+		XCTAssertEqual( divide(1, 7, 50), "0.14285714285714285714285714285714285714285714285714" )
+		XCTAssertEqual( divide(22, 7, 50), "3.14285714285714285714285714285714285714285714285714" )
+		
+		/// Fractions on both sides, different lengths
+		XCTAssertEqual( divide("0.000001", "0.3", 10), "0.0000033333" )
+		XCTAssertEqual( divide("1", "0.0000000000000000000003", 2), "3333333333333333333333.33" )
+		XCTAssertEqual( divide("123.456789", "0.001", 3), "123456.789" )
+		XCTAssertEqual( divide("0.00000000000000000000000001", "1000", 30), "0.00000000000000000000000000001" )
 	}
-
+	
 	func test_Rounding_Modes() throws {
-
+		
 		func divide(_ l: T, _ r: T, _ digits: Int, _ mode: T.RoundingMode) -> String {
-			Arbit.precision = digits
-			Arbit.rounding = mode
-			return (l / r).description
+			l.divided(by: r, T.Context(digits: digits, rounding: mode)).description
 		}
-
+		
 		/// 2/3 = 0.6666…
 		XCTAssertEqual( divide(2, 3, 4, .truncate), "0.6666" )
 		XCTAssertEqual( divide(2, 3, 4, .halfUp),   "0.6667" )
@@ -590,29 +592,28 @@ final class Test_Division: ArbitTestCase {
 
 	func test_Rounded() throws {
 
-		XCTAssertEqual( A("2.5").rounded(fraction: 0, mode: .truncate).description, "2" )
-		XCTAssertEqual( A("2.5").rounded(fraction: 0, mode: .halfUp).description, "3" )
-		XCTAssertEqual( A("2.5").rounded(fraction: 0, mode: .halfEven).description, "2" )
-		XCTAssertEqual( A("3.5").rounded(fraction: 0, mode: .halfEven).description, "4" )
-		XCTAssertEqual( A("2.51").rounded(fraction: 0, mode: .halfEven).description, "3" )
-		XCTAssertEqual( A("-2.5").rounded(fraction: 0, mode: .halfUp).description, "-3" )
+		XCTAssertEqual( A("2.5").rounded(T.Context(digits: 0, rounding: .truncate)).description, "2" )
+		XCTAssertEqual( A("2.5").rounded(T.Context(digits: 0, rounding: .halfUp)).description, "3" )
+		XCTAssertEqual( A("2.5").rounded(T.Context(digits: 0, rounding: .halfEven)).description, "2" )
+		XCTAssertEqual( A("3.5").rounded(T.Context(digits: 0, rounding: .halfEven)).description, "4" )
+		XCTAssertEqual( A("2.51").rounded(T.Context(digits: 0, rounding: .halfEven)).description, "3" )
+		XCTAssertEqual( A("-2.5").rounded(T.Context(digits: 0, rounding: .halfUp)).description, "-3" )
 
-		XCTAssertEqual( A("2.45").rounded(fraction: 1, mode: .halfUp).description, "2.5" )
-		XCTAssertEqual( A("2.449").rounded(fraction: 1, mode: .halfUp).description, "2.4" )
-		XCTAssertEqual( A("9.99").rounded(fraction: 1, mode: .halfUp).description, "10" )
-		XCTAssertEqual( A("-9.99").rounded(fraction: 1, mode: .halfUp).description, "-10" )
-		XCTAssertEqual( A("0.0004").rounded(fraction: 1, mode: .halfUp).description, "0" )
-		XCTAssertEqual( A("0.0005").rounded(fraction: 3, mode: .halfUp).description, "0.001" )
+		XCTAssertEqual( A("2.45").rounded(T.Context(digits: 1, rounding: .halfUp)).description, "2.5" )
+		XCTAssertEqual( A("2.449").rounded(T.Context(digits: 1, rounding: .halfUp)).description, "2.4" )
+		XCTAssertEqual( A("9.99").rounded(T.Context(digits: 1, rounding: .halfUp)).description, "10" )
+		XCTAssertEqual( A("-9.99").rounded(T.Context(digits: 1, rounding: .halfUp)).description, "-10" )
+		XCTAssertEqual( A("0.0004").rounded(T.Context(digits: 1, rounding: .halfUp)).description, "0" )
+		XCTAssertEqual( A("0.0005").rounded(T.Context(digits: 3, rounding: .halfUp)).description, "0.001" )
 
 		/// Nothing to do
-		XCTAssertEqual( A("1.5").rounded(fraction: 3, mode: .halfUp).description, "1.5" )
-		XCTAssertEqual( T(15).rounded(fraction: 0, mode: .halfUp).description, "15" )
+		XCTAssertEqual( A("1.5").rounded(T.Context(digits: 3, rounding: .halfUp)).description, "1.5" )
+		XCTAssertEqual( T(15).rounded(T.Context(digits: 0, rounding: .halfUp)).description, "15" )
 
-		/// Default mode is the global one
-		Arbit.rounding = .halfUp
-		XCTAssertEqual( A("1.2345").rounded(fraction: 3).description, "1.235" )
-		Arbit.rounding = .truncate
-		XCTAssertEqual( A("1.2345").rounded(fraction: 3).description, "1.234" )
+		/// The short forms
+		XCTAssertEqual( A("1.2345").rounded(halfUp(3)).description, "1.235" )
+		XCTAssertEqual( A("1.2345").rounded(.digits(3)).description, "1.234" )
+		XCTAssertEqual( A("1.23456789012345678").rounded().description, "1.2345678901234567" )
 	}
 
 	func test_By_Zero() throws {
@@ -851,17 +852,17 @@ final class Test_MathFunctions: ArbitTestCase {
 		XCTAssertTrue ( sqrt(T(-4)).isNaN )
 
 		XCTAssertEqual( sqrt(T(2)).description, "1.414213562373095" )
-		XCTAssertEqual( T(2).sqrRoot(digits: 0).description, "1" )
-		XCTAssertEqual( T(17).sqrRoot(digits: 0).description, "4" )
-		XCTAssertEqual( T(2).sqrRoot(digits: 5).description, "1.41421" )
+		XCTAssertEqual( T(2).sqrRoot(.digits(0)).description, "1" )
+		XCTAssertEqual( T(17).sqrRoot(.digits(0)).description, "4" )
+		XCTAssertEqual( T(2).sqrRoot(.digits(5)).description, "1.41421" )
 
 		/// Against the constants
-		XCTAssertEqual( T(2).sqrRoot(digits: 100), T.const(truncated: .sqr2, digits: 100) )
-		XCTAssertEqual( T(3).sqrRoot(digits: 100), T.const(truncated: .sqr3, digits: 100) )
-		XCTAssertEqual( T(5).sqrRoot(digits: 100), T.const(truncated: .sqr5, digits: 100) )
+		XCTAssertEqual( T(2).sqrRoot(.digits(100)), T.const(truncated: .sqr2, digits: 100) )
+		XCTAssertEqual( T(3).sqrRoot(.digits(100)), T.const(truncated: .sqr3, digits: 100) )
+		XCTAssertEqual( T(5).sqrRoot(.digits(100)), T.const(truncated: .sqr5, digits: 100) )
 
 		/// More fraction digits than what is asked for
-		XCTAssertEqual( A("2.0000000000000000000000000000001").sqrRoot(digits: 5).description, "1.41421" )
+		XCTAssertEqual( A("2.0000000000000000000000000000001").sqrRoot(.digits(5)).description, "1.41421" )
 	}
 
 	func test_Square_Root_Of_Squares() throws {
@@ -877,25 +878,24 @@ final class Test_MathFunctions: ArbitTestCase {
 	}
 
 	func test_Square_Root_Rounding() throws {
-
+		
 		/// √2 = 1.41421356…  √3 = 1.7320508…  √8 = 2.8284271…
-		Arbit.rounding = .halfUp
-		XCTAssertEqual( T(2).sqrRoot(digits: 3).description, "1.414" )
-		XCTAssertEqual( T(2).sqrRoot(digits: 4).description, "1.4142" )
-		XCTAssertEqual( T(2).sqrRoot(digits: 7).description, "1.4142136" )
-		XCTAssertEqual( T(3).sqrRoot(digits: 2).description, "1.73" )
-		XCTAssertEqual( T(8).sqrRoot(digits: 2).description, "2.83" )
-		XCTAssertEqual( T(8).sqrRoot(digits: 0).description, "3" )
-
+		XCTAssertEqual( T(2).sqrRoot(halfUp(3)).description, "1.414" )
+		XCTAssertEqual( T(2).sqrRoot(halfUp(4)).description, "1.4142" )
+		XCTAssertEqual( T(2).sqrRoot(halfUp(7)).description, "1.4142136" )
+		XCTAssertEqual( T(3).sqrRoot(halfUp(2)).description, "1.73" )
+		XCTAssertEqual( T(8).sqrRoot(halfUp(2)).description, "2.83" )
+		XCTAssertEqual( T(8).sqrRoot(halfUp(0)).description, "3" )
+		
 		/// Exactly half: √6.25 = 2.5
-		XCTAssertEqual( A("6.25").sqrRoot(digits: 0).description, "3" )
-		Arbit.rounding = .halfEven
-		XCTAssertEqual( A("6.25").sqrRoot(digits: 0).description, "2" )
-		XCTAssertEqual( A("12.25").sqrRoot(digits: 0).description, "4" )
-		Arbit.rounding = .truncate
-		XCTAssertEqual( A("6.25").sqrRoot(digits: 0).description, "2" )
+		XCTAssertEqual( A("6.25").sqrRoot(halfUp(0)).description, "3" )
+		XCTAssertEqual( A("6.25").sqrRoot(halfEven(0)).description, "2" )
+		XCTAssertEqual( A("12.25").sqrRoot(halfEven(0)).description, "4" )
+		XCTAssertEqual( A("6.25").sqrRoot(.digits(0)).description, "2" )
+		
+		XCTAssertEqual( sqrt(T(2), halfUp(7)).description, "1.4142136" )
 	}
-
+	
 	func test_Root() throws {
 
 		XCTAssertEqual( T(27).root(3).description, "3" )
@@ -909,22 +909,27 @@ final class Test_MathFunctions: ArbitTestCase {
 		XCTAssertEqual( T(7).root(1).description, "7" )
 		XCTAssertEqual( T(16).root(2).description, "4" )
 		XCTAssertEqual( T(16).root(-2).description, "0.25" )
-		XCTAssertEqual( T(10).root(3, digits: 0).description, "2" )
-		XCTAssertEqual( T(2).root(100, digits: 12).description, "1.006955550056" )
+		XCTAssertEqual( T(10).root(3, .digits(0)).description, "2" )
+		XCTAssertEqual( T(2).root(100, .digits(12)).description, "1.006955550056" )
 
 		XCTAssertTrue( T(-16).root(4).isNaN )
 		XCTAssertTrue( T(16).root(0).isNaN )
 
 		/// Against the constants
-		XCTAssertEqual( T(2).root(3, digits: 20), T.const(truncated: .cubeRoot2, digits: 20) )
-		XCTAssertEqual( T(3).root(3, digits: 60), T.const(truncated: .cubeRoot3, digits: 60) )
+		XCTAssertEqual( T(2).root(3, .digits(20)), T.const(truncated: .cubeRoot2, digits: 20) )
+		XCTAssertEqual( T(3).root(3, .digits(60)), T.const(truncated: .cubeRoot3, digits: 60) )
 
 		/// Rounding: ∛10 = 2.15443469…
-		Arbit.rounding = .halfUp
-		XCTAssertEqual( T(10).root(3, digits: 2).description, "2.15" )
-		XCTAssertEqual( T(10).root(3, digits: 3).description, "2.154" )
-		XCTAssertEqual( T(10).root(3, digits: 5).description, "2.15443" )
-		XCTAssertEqual( T(10).root(3, digits: 6).description, "2.154435" )
+		XCTAssertEqual( T(10).root(3, halfUp(2)).description, "2.15" )
+		XCTAssertEqual( T(10).root(3, halfUp(3)).description, "2.154" )
+		XCTAssertEqual( T(10).root(3, halfUp(5)).description, "2.15443" )
+		XCTAssertEqual( T(10).root(3, halfUp(6)).description, "2.154435" )
+		XCTAssertEqual( T(10).root(3, .digits(6)).description, "2.154434" )
+		
+		/// Exactly half: ∛3.375 = 1.5
+		XCTAssertEqual( A("3.375").root(3, halfUp(0)).description, "2" )
+		XCTAssertEqual( A("3.375").root(3, halfEven(0)).description, "2" )
+		XCTAssertEqual( A("15.625").root(3, halfEven(0)).description, "2" )
 	}
 
 	func test_Root_Of_Powers() throws {
@@ -960,19 +965,22 @@ final class Test_MathFunctions: ArbitTestCase {
 		XCTAssertTrue ( T(0).power(-1).isNaN )
 
 		/// Arbit exponent
-		XCTAssertEqual( T(2).power(T(10))?.description, "1024" )
-		XCTAssertEqual( pow(T(2), T(-1))?.description, "0.5" )
+		XCTAssertEqual( T(2).power(T(10)).description, "1024" )
+		XCTAssertEqual( pow(T(2), T(-1)).description, "0.5" )
+		XCTAssertEqual( T(3).power(-2, .digits(5)).description, "0.11111" )
+		XCTAssertEqual( T(3).power(-2, halfUp(3)).description, "0.111" )
+		XCTAssertEqual( T(3).power(-1, halfUp(3)).description, "0.333" )
+		XCTAssertEqual( T(6).power(-1, halfUp(3)).description, "0.167" )
 
 		/// 1/n exponent is the n-th root
 		XCTAssertEqual( T(2).power(A("0.5")), sqrt(T(2)) )
-		XCTAssertEqual( T(16).power(A("0.25"))?.description, "2" )
-		XCTAssertEqual( T(32).power(A("0.2"))?.description, "2" )
-		XCTAssertEqual( T(4).power(A("-0.5"))?.description, "0.5" )
+		XCTAssertEqual( T(16).power(A("0.25")).description, "2" )
+		XCTAssertEqual( T(32).power(A("0.2")).description, "2" )
+		XCTAssertEqual( T(4).power(A("-0.5")).description, "0.5" )
+		XCTAssertEqual( T(2).power(A("0.5"), .digits(30)).description, "1.414213562373095048801688724209" )
 
-		/// Other fractions are not supported
-		XCTAssertNil( T(2).power(A("0.3")) )
-		XCTAssertNil( T(2).power(A("1.5")) )
-		XCTAssertNil( T(2).power(A("99999999999999999999")) )
+		/// Too big exponent
+		XCTAssertTrue( T(2).power(A("99999999999999999999")).isNaN )
 	}
 
 	func test_Pow2_Pow10() throws {
@@ -1051,12 +1059,16 @@ final class Test_MathFunctions: ArbitTestCase {
 		XCTAssertEqual( T(18).digitalRoot(), 9 )
 		XCTAssertEqual( T(12345).digitalRoot(), 6 )
 		XCTAssertEqual( A("99999999999999999999999999999999999999").digitalRoot(), 9 )
+		
+		/// The fraction digits count too
+		XCTAssertEqual( A("1.5").digitalRoot(), 6 )
+		XCTAssertEqual( A("0.9").digitalRoot(), 9 )
+		XCTAssertEqual( A("123.456").digitalRoot(), 3 )
 	}
 
 	func test_Constants() throws {
 
 		/// The long literals against each other: a typo would break the identity
-		Arbit.precision = 995
 
 		func cut(_ value: T, _ digits: Int) -> T { var v = value ; v.clamp(fraction: digits) ; return v }
 
@@ -1066,7 +1078,7 @@ final class Test_MathFunctions: ArbitTestCase {
 
 		let sqr5 = T.const(truncated: .sqr5, digits: 1000)
 		let phi = T.const(truncated: .phi, digits: 1000)
-		XCTAssertEqual( cut((sqr5 + 1) / 2, 990), cut(phi, 990) )
+		XCTAssertEqual( cut((sqr5 + 1).divided(by: 2, .digits(995)), 990), cut(phi, 990) )
 
 		let sqr2 = T.const(truncated: .sqr2, digits: 1000)
 		let silver = T.const(truncated: .silver, digits: 1000)
@@ -1198,8 +1210,20 @@ final class Test_Binary: ArbitTestCase {
 		XCTAssertEqual( T(5).bitWidth, 64 )
 		XCTAssertEqual( T(UInt64.max).bitWidth, 128 )
 
-		/// The standard library converts by the words
+		/// To the integer types
 		XCTAssertEqual( Int(T(-42)), -42 )
+		XCTAssertEqual( Int(A("-42.9")), -42 )
+		XCTAssertEqual( Int(exactly: A("42.5")), nil )
+		XCTAssertEqual( Int(clamping: A("42.5")), 42 )
+		XCTAssertEqual( Int(clamping: T.nan), 0 )
+		XCTAssertEqual( Int(clamping: T.inf), Int.max )
+		XCTAssertEqual( Int(clamping: -T.inf), Int.min )
+		XCTAssertEqual( Int(clamping: A("-99999999999999999999999")), Int.min )
+		XCTAssertEqual( UInt(clamping: T(-5)), 0 )
+		XCTAssertEqual( Int8(truncatingIfNeeded: T(-1)), -1 )
+		XCTAssertEqual( Int8(truncatingIfNeeded: T(255)), -1 )
+		XCTAssertEqual( Int64(truncatingIfNeeded: T("18446744073709551617")), 1 )
+		XCTAssertEqual( Int64(truncatingIfNeeded: T(-2)), -2 )
 		XCTAssertEqual( Int(T(Int.min)), Int.min )
 		XCTAssertEqual( UInt64(T(UInt64.max)), UInt64.max )
 		XCTAssertEqual( Int8(clamping: T(1000)), 127 )
@@ -1233,11 +1257,11 @@ final class Test_Binary: ArbitTestCase {
 		XCTAssertEqual( Array(stride(from: T(10), to: T(0), by: T(-5))), [10, 5] )
 		XCTAssertEqual( stride(from: A("0"), to: A("1"), by: A("0.25")).map(\.description), ["0", "0.25", "0.5", "0.75"] )
 
+		/// Arbit is not an integer type, so a range of it cannot be walked: stride does it
 		var sum = T(0)
-		for i in T(1)...T(100) { sum += i }
+		for i in stride(from: T(1), through: T(100), by: 1) { sum += i }
 		XCTAssertEqual( sum, 5050 )
 
-		XCTAssertEqual( Array(T(9)..<T(12)), [9, 10, 11] )
 		XCTAssertTrue ( (T(9)...T(11)).contains(10) )
 		XCTAssertTrue ( (T(9)...T(11)).contains(A("10.5")) )
 		XCTAssertFalse( (T(9)...T(11)).contains(A("11.5")) )
@@ -1254,5 +1278,581 @@ final class Test_Binary: ArbitTestCase {
 		XCTAssertEqual( T(0).asBinaryCodedDecimal(), [0x00] )
 		XCTAssertEqual( T(9).asBinaryCodedDecimal(), [0x09] )
 		XCTAssertEqual( T(1234).asBinaryCodedDecimal(packed: false), [1, 2, 3, 4] )
+	}
+}
+
+
+
+// MARK: Exponential, logarithm, trigonometry
+
+final class Test_Functions: ArbitTestCase {
+	
+	/// (function, argument, fraction digits, the value cut to the digits) – calculated with an independent tool
+	static let references: [(String, String, Int, String)] = [
+		("exp", "1", 50, "2.71828182845904523536028747135266249775724709369995"),
+		("exp", "-1", 30, "0.367879441171442321595523770161"),
+		("exp", "0.5", 40, "1.6487212707001281468486507878141635716537"),
+		("exp", "10", 25, "22026.4657948067165169579006452"),
+		("exp", "-10", 30, "0.000045399929762484851535591515"),
+		("exp", "100", 10, "26881171418161354484126255515800135873611118.7737419224"),
+		("exp", "0.000001", 30, "1.000001000000500000166666708333"),
+		("exp", "2.5", 16, "12.1824939607034734"),
+		("exp", "-0.3", 16, "0.7408182206817178"),
+		("exp", "123.456", 5, "413294435277809344957685441227343146614594393746575438.72529"),
+		("ln", "2", 50, "0.69314718055994530941723212145817656807550013436025"),
+		("ln", "10", 40, "2.3025850929940456840179914546843642076011"),
+		("ln", "0.5", 30, "-0.693147180559945309417232121458"),
+		("ln", "1.0001", 30, "0.00009999500033330833533316668"),
+		("ln", "123456789", 25, "18.6314017661680180331939333"),
+		("ln", "0.000123", 25, "-9.0033262025918566088459401"),
+		("ln", "3", 16, "1.0986122886681096"),
+		("ln", "7.389", 16, "1.9999924078065105"),
+		("ln", "99999999999999999999999999", 20, "59.86721241784518778446"),
+		("log10", "2", 40, "0.3010299956639811952137388947244930267681"),
+		("log10", "50", 30, "1.698970004336018804786261105275"),
+		("log10", "0.3", 25, "-0.522878745280337562704972"),
+		("log2", "10", 30, "3.321928094887362347870319429489"),
+		("log2", "3", 16, "1.5849625007211561"),
+		("sin", "1", 50, "0.84147098480789650665250232163029899962256306079837"),
+		("sin", "0.5", 30, "0.479425538604203000273287935215"),
+		("sin", "-2", 30, "-0.909297426825681695396019865911"),
+		("sin", "3", 30, "0.141120008059867222100744802808"),
+		("sin", "100", 30, "-0.506365641109758793656557610459"),
+		("sin", "1000000", 25, "-0.3499935021712929521176524"),
+		("sin", "0.0001", 30, "0.000099999999833333333416666666"),
+		("sin", "4", 16, "-0.7568024953079282"),
+		("cos", "1", 50, "0.54030230586813971740093660744297660373231042061792"),
+		("cos", "0.5", 30, "0.877582561890372716116281582603"),
+		("cos", "-2", 30, "-0.4161468365471423869975682295"),
+		("cos", "3", 30, "-0.989992496600445457271572794731"),
+		("cos", "100", 30, "0.86231887228768393410193851395"),
+		("cos", "1000000", 25, "0.9367521275331447869385325"),
+		("cos", "4", 16, "-0.6536436208636119"),
+		("tan", "1", 40, "1.5574077246549022305069748074583601730872"),
+		("tan", "0.5", 30, "0.54630248984379051325517946578"),
+		("tan", "-2", 25, "2.1850398632615189916433061"),
+		("tan", "1.5", 25, "14.1014199471717193876460836"),
+		("tan", "100", 20, "-0.58721391515692907667"),
+		("atan", "1", 50, "0.78539816339744830961566084581987572104929234984377"),
+		("atan", "0.5", 40, "0.4636476090008061162142562314612144020285"),
+		("atan", "-3", 30, "-1.249045772398254425829917077281"),
+		("atan", "0.01", 30, "0.009999666686665238206340116209"),
+		("atan", "1000", 30, "1.569796327128229752564797882004"),
+		("atan", "0.9", 16, "0.7328151017865065"),
+		("asin", "0.5", 40, "0.5235987755982988730771072305465838140328"),
+		("asin", "-0.9", 30, "-1.119769514998634186686677055845"),
+		("asin", "0.1", 25, "0.1001674211615597963455231"),
+		("acos", "0.5", 40, "1.0471975511965977461542144610931676280657"),
+		("acos", "-0.9", 30, "2.690565841793530805917998747485"),
+		("acos", "0.1", 25, "1.4706289056333368228857985"),
+		("sinh", "1", 40, "1.1752011936438014568823818505956008151557"),
+		("sinh", "-2.5", 30, "-6.05020448103978732145032363835"),
+		("cosh", "1", 40, "1.5430806348152437784779056207570616826015"),
+		("cosh", "-2.5", 30, "6.132289479663686116619852312817"),
+		("tanh", "1", 40, "0.7615941559557648881194582826047935904127"),
+		("tanh", "-0.3", 30, "-0.291312612451590905818221272823"),
+		("tanh", "5", 25, "0.9999092042625951312109904"),
+		("toRadians", "180", 40, "3.1415926535897932384626433832795028841971"),
+		("toRadians", "45", 30, "0.785398163397448309615660845819"),
+		("toDegrees", "1", 30, "57.295779513082320876798154814105"),
+		("toDegrees", "3.14159", 20, "179.99984796050428844334"),
+	]
+	
+	static func call(_ name: String, _ x: T, _ context: T.Context) -> T {
+		switch name {
+			case "exp": return x.exp(context)
+			case "ln": return x.ln(context)
+			case "log10": return x.log10(context)
+			case "log2": return x.log2(context)
+			case "sin": return x.sin(context)
+			case "cos": return x.cos(context)
+			case "tan": return x.tan(context)
+			case "atan": return x.atan(context)
+			case "asin": return x.asin(context)
+			case "acos": return x.acos(context)
+			case "sinh": return x.sinh(context)
+			case "cosh": return x.cosh(context)
+			case "tanh": return x.tanh(context)
+			case "toRadians": return x.toRadians(context)
+			case "toDegrees": return x.toDegrees(context)
+			default: return .nan
+		}
+	}
+	
+	func test_Against_References() throws {
+		
+		for (name, argument, digits, expected) in Self.references {
+			let result = Self.call(name, A(argument), .digits(digits))
+			
+			XCTAssertEqual( result.description, expected, "\(name)(\(argument)) on \(digits) digits")
+			assertCanonical(result, "\(name)(\(argument))")
+		}
+	}
+	
+	func test_Rounding_Is_Not_More_Than_One_Unit() throws {
+		
+		/// The rounded value is the truncated one, or one unit of the last digit bigger in absolute value
+		for (name, argument, digits, expected) in Self.references where digits >= 10 {
+			
+			let cut = digits - 5
+			var truncated = A(expected)
+			truncated.clamp(fraction: cut)
+			
+			let unit = T(-cut).pow10()
+			
+			for context in [halfUp(cut), halfEven(cut)] {
+				let result = Self.call(name, A(argument), context)
+				let difference = (result - truncated).magnitude
+				
+				XCTAssertTrue( difference == 0 || difference == unit, "\(name)(\(argument)): \(result) vs \(truncated)")
+			}
+		}
+	}
+	
+	func test_Exp_Ln_Special() throws {
+		
+		XCTAssertEqual( T(0).exp().description, "1" )
+		XCTAssertEqual( T(1).exp(.digits(30)), T.const(truncated: .e, digits: 30) )
+		XCTAssertEqual( T(1).exp(.digits(500)), T.const(truncated: .e, digits: 500) )
+		XCTAssertEqual( exp(T(1)).description, "2.7182818284590452" )
+		XCTAssertEqual( T(-1000).exp().description, "0" )
+		XCTAssertEqual( T(10_000_000).exp().description, "inf" )
+		XCTAssertEqual( T(-10_000_000).exp().description, "0" )
+		XCTAssertEqual( T.inf.exp().description, "inf" )
+		XCTAssertEqual( (-T.inf).exp().description, "0" )
+		XCTAssertTrue ( T.nan.exp().isNaN )
+		
+		XCTAssertEqual( T(1).ln().description, "0" )
+		XCTAssertEqual( T(0).ln().description, "-inf" )
+		XCTAssertTrue ( T(-1).ln().isNaN )
+		XCTAssertEqual( T.inf.ln().description, "inf" )
+		XCTAssertEqual( T(2).ln(.digits(500)), T.const(truncated: .ln2, digits: 500) )
+		XCTAssertEqual( log(T(2)).description, "0.6931471805599453" )
+		
+		/// Exact results stay exact
+		XCTAssertEqual( T(100).log10().description, "2" )
+		XCTAssertEqual( T(1000).log10(.digits(40)).description, "3" )
+		XCTAssertEqual( A("0.001").log10().description, "-3" )
+		XCTAssertEqual( T(1).log10().description, "0" )
+		XCTAssertEqual( T(1024).log2().description, "10" )
+		XCTAssertEqual( A("0.125").log2().description, "-3" )
+		XCTAssertEqual( T(81).log(base: 3).description, "4" )
+		XCTAssertEqual( T(8).log(base: A("0.5")).description, "-3" )
+		XCTAssertEqual( T(2).log(base: 10, .digits(20)), T(2).log10(.digits(20)) )
+		
+		XCTAssertTrue( T(8).log(base: 1).isNaN )
+		XCTAssertTrue( T(8).log(base: 0).isNaN )
+		XCTAssertTrue( T(8).log(base: -2).isNaN )
+		XCTAssertTrue( T(-8).log10().isNaN )
+	}
+	
+	func test_Exp_Ln_Inverse() throws {
+		
+		var generator = SeededGenerator(seed: 21)
+		
+		for _ in 1...25 {
+			let x = A(randomNumber(&generator, int: 0...3, frc: 1...8, signed: false)) + A("0.001")
+			
+			/// ln(e^x) = x  and  e^ln(x) = x , with some guard digits between
+			XCTAssertEqual( x.exp(.digits(40)).ln(.digits(25)), x, "ln(exp(\(x)))")
+			XCTAssertEqual( x.ln(.digits(40)).exp(.digits(25)), x, "exp(ln(\(x)))")
+		}
+		
+		/// e^(a+b) = e^a × e^b
+		let (a, b) = (A("1.25"), A("2.5"))
+		XCTAssertEqual( (a + b).exp(.digits(30)), (a.exp(.digits(40)) * b.exp(.digits(40))).rounded(.digits(30)) )
+		
+		/// ln(a × b) = ln(a) + ln(b)
+		XCTAssertEqual( (a * b).ln(.digits(30)), (a.ln(.digits(40)) + b.ln(.digits(40))).rounded(.digits(30)) )
+	}
+	
+	func test_Trigonometry_Special() throws {
+		
+		XCTAssertEqual( T(0).sin().description, "0" )
+		XCTAssertEqual( T(0).cos().description, "1" )
+		XCTAssertEqual( T(0).tan().description, "0" )
+		XCTAssertEqual( T(0).atan().description, "0" )
+		XCTAssertEqual( T(0).asin().description, "0" )
+		
+		let pi = T.const(truncated: .pi, digits: 60)
+		
+		/// The angle is not exactly π (it is cut), so the result is not exactly zero, only on the asked digits
+		XCTAssertEqual( pi.sin(.digits(40)).description, "0" )
+		XCTAssertEqual( pi.cos(.digits(40)).description, "-1" )
+		XCTAssertEqual( (pi / 2).sin().description, "1" )
+		XCTAssertEqual( pi.divided(by: 6, .digits(60)).sin(.digits(40)).description, "0.5" )
+		XCTAssertEqual( pi.divided(by: 3, .digits(60)).cos(.digits(40)).description, "0.5" )
+		XCTAssertEqual( pi.divided(by: 4, .digits(60)).tan(.digits(40)).description, "1" )
+		
+		/// Inverses of the known values
+		/// (the multiplication makes the cut bigger, so it is calculated with more digits and cut after)
+		XCTAssertEqual( (T(1).atan(.digits(55)) * 4).rounded(.digits(50)), T.const(truncated: .pi, digits: 50) )
+		XCTAssertEqual( (T(1).asin(.digits(55)) * 2).rounded(.digits(50)), T.const(truncated: .pi, digits: 50) )
+		XCTAssertEqual( T(-1).acos(.digits(50)), T.const(truncated: .pi, digits: 50) )
+		XCTAssertEqual( T(1).acos().description, "0" )
+		XCTAssertEqual( (A("0.5").asin(.digits(45)) * 6).rounded(.digits(40)), T.const(truncated: .pi, digits: 40) )
+		
+		XCTAssertTrue( A("1.0001").asin().isNaN )
+		XCTAssertTrue( T(-2).acos().isNaN )
+		XCTAssertTrue( T.nan.sin().isNaN )
+		XCTAssertTrue( T.inf.cos().isNaN )
+		XCTAssertEqual( (T.inf.atan(.digits(35)) * 2).rounded(.digits(30)), T.const(truncated: .pi, digits: 30) )
+		
+		/// Global forms
+		XCTAssertEqual( sin(T(1)).description, "0.8414709848078965" )
+		XCTAssertEqual( cos(T(1)).description, "0.5403023058681397" )
+		XCTAssertEqual( atan(T(1), .digits(10)).description, "0.7853981633" )
+		
+		/// Degrees
+		XCTAssertEqual( T(180).toRadians(.digits(50)), T.const(truncated: .pi, digits: 50) )
+		XCTAssertEqual( T(90).toRadians(.digits(30)).sin(.digits(20)).description, "1" )
+		XCTAssertEqual( T.const(truncated: .pi, digits: 60).toDegrees(.digits(40)).description, "180" )
+	}
+	
+	func test_Trigonometry_Identities() throws {
+		
+		var generator = SeededGenerator(seed: 22)
+		let ctx = T.Context.digits(40)
+		
+		for _ in 1...20 {
+			let x = A(randomNumber(&generator, int: 0...2, frc: 1...6))
+			let (sin, cos) = (x.sin(ctx), x.cos(ctx))
+			
+			/// sin² + cos² = 1
+			XCTAssertEqual( (sin * sin + cos * cos).rounded(halfUp(30)), 1, "sin² + cos² of \(x)")
+			
+			/// Odd and even
+			XCTAssertEqual( (-x).sin(ctx), -sin )
+			XCTAssertEqual( (-x).cos(ctx), cos )
+			
+			/// tan = sin / cos
+			XCTAssertEqual( x.tan(.digits(20)), sin.divided(by: cos, .digits(30)).rounded(.digits(20)), "tan(\(x))" )
+		}
+		
+		/// Inverse on the main range
+		for string in ["0.1", "-0.5", "0.9", "1.2", "-1.5"] {
+			let x = A(string)
+			XCTAssertEqual( x.tan(.digits(50)).atan(.digits(30)), x, "atan(tan(\(x)))")
+			XCTAssertEqual( x.sin(.digits(50)).asin(.digits(20)), x, "asin(sin(\(x)))")
+		}
+		
+		/// atan2 by the quadrants: n × π / 4
+		let pi = T.const(truncated: .pi, digits: 60)
+		func quarters(_ count: Int) -> T { (pi * T(count)).divided(by: 4, .digits(30)) }
+		
+		XCTAssertEqual( T.atan2(1, 1, .digits(30)), quarters(1) )
+		XCTAssertEqual( T.atan2(1, -1, .digits(30)), quarters(3) )
+		XCTAssertEqual( T.atan2(-1, -1, .digits(30)), quarters(-3) )
+		XCTAssertEqual( T.atan2(-1, 1, .digits(30)), quarters(-1) )
+		XCTAssertEqual( T.atan2(1, 0, .digits(30)), quarters(2) )
+		XCTAssertEqual( T.atan2(-1, 0, .digits(30)), quarters(-2) )
+		XCTAssertEqual( T.atan2(0, 0).description, "0" )
+		XCTAssertEqual( T.atan2(0, 5).description, "0" )
+		XCTAssertEqual( atan2(T(0), T(-5), .digits(30)), T.const(truncated: .pi, digits: 30) )
+		
+		/// cosh² - sinh² = 1
+		let x = A("1.75")
+		let (sinh, cosh) = (x.sinh(ctx), x.cosh(ctx))
+		XCTAssertEqual( (cosh * cosh - sinh * sinh).rounded(halfUp(30)), 1 )
+		XCTAssertEqual( x.tanh(.digits(20)), sinh.divided(by: cosh, .digits(30)).rounded(.digits(20)) )
+		XCTAssertEqual( T(0).sinh().description, "0" )
+		XCTAssertEqual( T(0).cosh().description, "1" )
+		XCTAssertEqual( T(0).tanh().description, "0" )
+		XCTAssertEqual( T(1000).tanh().description, "1" )
+	}
+	
+	func test_Constants_Over_The_Stored_Length() throws {
+		
+		/// Over the stored length the constants are calculated; the stored and the calculated one must meet
+		let stored = T.const(truncated: .pi, digits: 990)
+		var calculated = T.pi(digits: 1200)
+		XCTAssertTrue( calculated.description.hasSuffix("889075098381754637464939319255060400927701671139009848824012") )
+		calculated.clamp(fraction: 990)
+		XCTAssertEqual( calculated, stored )
+		
+		XCTAssertTrue( T.ln2(digits: 1200).description.hasSuffix("948793067865158870900605203468429736193841289652556539686022") )
+		
+		var ln10 = T.ln10(digits: 60)
+		ln10.clamp(fraction: 50)
+		XCTAssertEqual( ln10.description, "2.30258509299404568401799145468436420760110148862877" )
+	}
+	
+	func test_General_Power() throws {
+		
+		/// (base, exponent, fraction digits, value)
+		let cases: [(String, String, Int, String)] = [
+		("2", "0.3", 16, "1.2311444133449162"),
+		("2", "1.5", 16, "2.82842712474619"),
+		("10", "0.3010299956639812", 12, "2"),
+		("2.5", "3.7", 30, "29.674132536420854480852221606697"),
+		("0.5", "2.25", 25, "0.2102241038134286357577813"),
+		("123.456", "-1.5", 20, "0.00072900699845598761"),
+		("2", "-0.3", 20, "0.8122523963562355226"),
+		("7", "0.3333333333", 20, "1.9129311826483093611"),
+			("9", "1.5", 20, "27"),
+			("4", "2.5", 20, "32"),
+			("0.25", "1.5", 20, "0.125"),
+		]
+		
+		for (base, exponent, digits, expected) in cases {
+			XCTAssertEqual( A(base).power(A(exponent), .digits(digits)).description, expected, "\(base) ^ \(exponent)")
+		}
+		
+		XCTAssertEqual( T(0).power(A("1.5")).description, "0" )
+		XCTAssertTrue ( T(0).power(A("-1.5")).isNaN )
+		XCTAssertTrue ( T(-2).power(A("1.5")).isNaN )
+		XCTAssertEqual( T(-8).power(A("0.2")).description, "-1.515716566510398" )
+		
+		/// The operator: stronger than the multiplication, and from the right
+		XCTAssertEqual( T(2) ** 10, 1024 )
+		XCTAssertEqual( T(2) ** T(10), 1024 )
+		XCTAssertEqual( T(2) ** -1, A("0.5") )
+		XCTAssertEqual( T(2) * T(3) ** 2, 18 )
+		XCTAssertEqual( T(2) ** 3 ** 2, 512 )
+		XCTAssertEqual( T(1) + T(2) ** 3, 9 )
+		XCTAssertEqual( T(16) ** A("0.5"), 4 )
+		XCTAssertEqual( (T(2) ** A("0.3")).description, "1.2311444133449162" )
+		
+		var value = T(3)
+		value **= 4
+		XCTAssertEqual( value, 81 )
+	}
+}
+
+
+
+// MARK: Integer functions
+
+final class Test_IntegerFunctions: ArbitTestCase {
+	
+	func test_Floor_Ceil_Truncated() throws {
+		
+		/// (number, floor, ceil, truncated)
+		let cases: [(String, String, String, String)] = [
+			("2.5", "2", "3", "2"),
+			("-2.5", "-3", "-2", "-2"),
+			("2", "2", "2", "2"),
+			("-2", "-2", "-2", "-2"),
+			("0.001", "0", "1", "0"),
+			("-0.001", "-1", "0", "0"),
+			("0", "0", "0", "0"),
+			("99999999999999999999.9", "99999999999999999999", "100000000000000000000", "99999999999999999999"),
+			("-99999999999999999999.9", "-100000000000000000000", "-99999999999999999999", "-99999999999999999999"),
+		]
+		
+		for (number, floored, ceiled, truncated) in cases {
+			XCTAssertEqual( A(number).floor().description, floored, "floor \(number)")
+			XCTAssertEqual( A(number).ceil().description, ceiled, "ceil \(number)")
+			XCTAssertEqual( A(number).truncated().description, truncated, "truncated \(number)")
+			
+			assertCanonical(A(number).ceil())
+			assertCanonical(A(number).truncated())
+		}
+		
+		XCTAssertEqual( floor(A("-0.5")), -1 )
+		XCTAssertEqual( ceil(A("0.5")), 1 )
+		XCTAssertTrue ( T.nan.floor().isNaN )
+		XCTAssertEqual( T.inf.ceil().description, "inf" )
+	}
+	
+	func test_Factorial() throws {
+		
+		XCTAssertEqual( T(0).factorial(), 1 )
+		XCTAssertEqual( T(1).factorial(), 1 )
+		XCTAssertEqual( T(5).factorial(), 120 )
+		XCTAssertEqual( T(20).factorial().description, "2432902008176640000" )
+		XCTAssertEqual( T(30).factorial().description, "265252859812191058636308480000000" )
+		XCTAssertEqual( T(100).factorial().description, "93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000" )
+		XCTAssertEqual( T(1000).factorial().count, 2568 )
+		
+		XCTAssertTrue( T(-1).factorial().isNaN )
+		XCTAssertTrue( A("2.5").factorial().isNaN )
+		XCTAssertTrue( T.nan.factorial().isNaN )
+	}
+	
+	func test_Gcd_Lcm() throws {
+		
+		XCTAssertEqual( T.gcd(12, 18), 6 )
+		XCTAssertEqual( T.gcd(-12, 18), 6 )
+		XCTAssertEqual( T.gcd(12, -18), 6 )
+		XCTAssertEqual( T.gcd(17, 5), 1 )
+		XCTAssertEqual( T.gcd(0, 5), 5 )
+		XCTAssertEqual( T.gcd(5, 0), 5 )
+		XCTAssertEqual( T.gcd(0, 0), 0 )
+		XCTAssertEqual( T.gcd(A("123456789012345678901234567890"), A("987654321098765432109876543210")).description, "9000000000900000000090" )
+		
+		XCTAssertEqual( T.lcm(4, 6), 12 )
+		XCTAssertEqual( T.lcm(-4, 6), 12 )
+		XCTAssertEqual( T.lcm(0, 6), 0 )
+		XCTAssertEqual( T.lcm(7, 13), 91 )
+		XCTAssertEqual( T.lcm(A("123456789012345678901234567890"), A("987654321098765432109876543210")).description, "13548070124980948012498094801236261410" )
+		
+		XCTAssertTrue( T.gcd(A("1.5"), 3).isNaN )
+		XCTAssertTrue( T.lcm(3, A("1.5")).isNaN )
+		XCTAssertTrue( T.gcd(T.nan, 3).isNaN )
+		
+		/// gcd × lcm = |a × b|
+		var generator = SeededGenerator(seed: 23)
+		for _ in 1...30 {
+			let a = A(randomNumber(&generator, int: 1...30))
+			let b = A(randomNumber(&generator, int: 1...30))
+			XCTAssertEqual( T.gcd(a, b) * T.lcm(a, b), (a * b).magnitude, "\(a), \(b)")
+			XCTAssertTrue( a.isMultiple(of: T.gcd(a, b)) )
+		}
+	}
+}
+
+
+
+// MARK: Text forms
+
+final class Test_Text: ArbitTestCase {
+	
+	func test_Scientific() throws {
+		
+		let cases: [(String, String)] = [
+			("0", "0e0"), ("5", "5e0"), ("-5", "-5e0"), ("10", "1e1"), ("100", "1e2"), ("12345.678", "1.2345678e4"),
+			("0.00123", "1.23e-3"), ("-0.00123", "-1.23e-3"), ("0.5", "5e-1"), ("1.5", "1.5e0"),
+			("123456789012345678901234567890", "1.2345678901234567890123456789e29"),
+		]
+		
+		for (number, expected) in cases {
+			let text = A(number).scientific()
+			
+			XCTAssertEqual( text, expected, number)
+			XCTAssertEqual( T(text), A(number), "round trip of \(number)")
+		}
+		
+		/// Limited significant digits
+		XCTAssertEqual( A("12345.678").scientific(significant: 3), "1.23e4" )
+		XCTAssertEqual( A("12355.678").scientific(significant: 3, rounding: .halfUp), "1.24e4" )
+		XCTAssertEqual( A("9999").scientific(significant: 2, rounding: .halfUp), "1e4" )
+		XCTAssertEqual( A("0.000999").scientific(significant: 1, rounding: .halfUp), "1e-3" )
+		XCTAssertEqual( A("1.5").scientific(significant: 5), "1.5e0" )
+		
+		XCTAssertEqual( T.nan.scientific(), "nan" )
+		XCTAssertEqual( (-T.inf).scientific(), "-inf" )
+	}
+	
+	func test_Codable() throws {
+		
+		struct Invoice: Codable, Equatable {
+			var total: Arbit
+			var items: [Arbit]
+		}
+		
+		let invoice = Invoice(total: A("-123456789012345678901234567890.000000000000000000001"),
+									 items: [0, A("0.1"), T(1) / T(3), .inf])
+		
+		let data = try JSONEncoder().encode(invoice)
+		let json = String(decoding: data, as: UTF8.self)
+		
+		XCTAssertTrue( json.contains("\"-123456789012345678901234567890.000000000000000000001\"") )
+		XCTAssertTrue( json.contains("\"0.3333333333333333\"") )
+		
+		XCTAssertEqual( try JSONDecoder().decode(Invoice.self, from: data), invoice )
+		
+		/// nan is not equal to itself, so it is checked alone
+		let nan = try JSONDecoder().decode([Arbit].self, from: try JSONEncoder().encode([T.nan]))
+		XCTAssertEqual( nan.first?.isNaN, true )
+		
+		XCTAssertEqual( try JSONDecoder().decode([Arbit].self, from: Data("[\"1.50\", \"1e3\"]".utf8)), [A("1.5"), 1000] )
+		XCTAssertThrowsError( try JSONDecoder().decode([Arbit].self, from: Data("[\"abc\"]".utf8)) )
+	}
+	
+	func test_Sendable_And_Threads() throws {
+		
+		/// No shared mutable state: the same calculation on many threads gives the same result
+		let expected = T(2).sqrRoot(.digits(200))
+		let results = UnsafeMutablePointer<Bool>.allocate(capacity: 16)
+		results.initialize(repeating: false, count: 16)
+		defer { results.deallocate() }
+		
+		DispatchQueue.concurrentPerform(iterations: 16) { index in
+			let digits = index % 2 == 0 ? 200 : 50
+			let value = T(2).sqrRoot(.digits(digits)) + T(1).divided(by: 3, .digits(digits)) - T(1).divided(by: 3, .digits(digits))
+			results[index] = digits == 200 ? value == expected : value == expected.rounded(.digits(50))
+		}
+		
+		XCTAssertTrue( (0..<16).allSatisfy { results[$0] } )
+		
+		func send<Value: Sendable>(_ value: Value) -> Value { value }
+		XCTAssertEqual( send(T(5)), 5 )
+		XCTAssertEqual( send(T.Context.digits(3)).digits, 3 )
+	}
+}
+
+
+
+// MARK: Long numbers
+
+final class Test_Long: ArbitTestCase {
+	
+	func test_Long_Mul_Div_Round_Trip() throws {
+		
+		var generator = SeededGenerator(seed: 31)
+		
+		for digits in [19, 27, 36, 100, 500, 2000] {
+			for _ in 1...4 {
+				let a = A(randomNumber(&generator, int: digits...digits))
+				let b = A(randomNumber(&generator, int: (digits / 2)...digits))
+				let c = A(randomNumber(&generator, int: 1...(digits / 2), signed: false))
+				
+				let product = a * b
+				let (q, r) = (product + c).quotientAndRemainder(dividingBy: b)
+				
+				/// c is shorter than b, so the quotient is a and the remainder is c (with the sign of the dividend)
+				XCTAssertEqual( product / b, a, "\(digits) digits")
+				XCTAssertEqual( q * b + r, product + c, "\(digits) digits")
+				XCTAssertTrue( r.magnitude < b.magnitude )
+				
+				if digits <= 100 { XCTAssertEqual( T.karatsuba(a, b), product, "\(digits) digits") }
+			}
+		}
+	}
+	
+	func test_Long_Slices() throws {
+		
+		/// The edges of the 9 digit slices
+		let nines = A(String(repeating: "9", count: 27))
+		
+		XCTAssertEqual( (nines * nines).description, String(repeating: "9", count: 26) + "8" + String(repeating: "0", count: 26) + "1" )
+		XCTAssertEqual( (nines + 1).description, "1" + String(repeating: "0", count: 27) )
+		XCTAssertEqual( (nines * nines) / nines, nines )
+		XCTAssertEqual( ((nines + 1) * (nines + 1)) / (nines + 1), nines + 1 )
+		
+		let big = A("1" + String(repeating: "0", count: 45))
+		XCTAssertEqual( (big - 1).quotientAndRemainder(dividingBy: A("1" + String(repeating: "0", count: 27))).quotient.description,
+							 String(repeating: "9", count: 18) )
+		XCTAssertEqual( (big - 1).quotientAndRemainder(dividingBy: A("1" + String(repeating: "0", count: 27))).remainder.description,
+							 String(repeating: "9", count: 27) )
+		
+		/// The estimation of the quotient slice needs correction here
+		let a = A("999999999999999999999999999000000000000000000000000000")
+		let b = A("999999999999999999999999999")
+		XCTAssertEqual( (a / b).description, "1000000000000000000000000000" )
+		XCTAssertEqual( (A("500000000000000000000000000") * 2 - 1).quotientAndRemainder(dividingBy: A("500000000000000000000000000")).quotient, 1 )
+	}
+	
+	func test_Long_Conversions() throws {
+		
+		var generator = SeededGenerator(seed: 32)
+		
+		for digits in [1, 9, 10, 19, 100, 1000] {
+			let value = A(randomNumber(&generator, int: digits...digits, signed: false))
+			
+			XCTAssertEqual( T(bin: value.asBinary()), value, "\(digits) digits")
+			XCTAssertEqual( T(hex: value.asHexadecimal()), value, "\(digits) digits")
+			XCTAssertEqual( value.asBinary().count, value.asHexadecimal().binToDec().isEmpty ? 0 : value.asBinary().count )
+		}
+		
+		XCTAssertEqual( T(4096).pow2().asHexadecimal(), "1" + String(repeating: "0", count: 1024) )
+		XCTAssertEqual( T(4096).pow2().asBinary().count, 4097 )
+		XCTAssertEqual( (T(64).pow2() - 1).asBinary(), String(repeating: "1", count: 64) )
+		XCTAssertEqual( T(32).pow2().asBinary(), "1" + String(repeating: "0", count: 32) )
+		XCTAssertEqual( T(32).pow2().asHexadecimal(), "100000000" )
+		XCTAssertEqual( (T(32).pow2() - 1).asHexadecimal(), "FFFFFFFF" )
+		XCTAssertEqual( "100000000000000000000000000000000".binToDec(), "4294967296" )
+		XCTAssertEqual( "".binToDec(), "0" )
 	}
 }

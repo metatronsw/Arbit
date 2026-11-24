@@ -16,3 +16,5 @@ Artwork/
 
 Install/
 *.zip
+# macOS folder icon (the name ends with a carriage return)
+Icon?
