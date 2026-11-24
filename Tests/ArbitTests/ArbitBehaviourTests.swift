@@ -1856,3 +1856,186 @@ final class Test_Long: ArbitTestCase {
 		XCTAssertEqual( "".binToDec(), "0" )
 	}
 }
+
+
+
+// MARK: Strideable
+
+/// The stride works by `advanced(by:)` and `distance(to:)`, which are plain Arbit addition and subtraction:
+/// nothing goes through Int, so the values and the steps can be bigger than any integer type.
+final class Test_Stride: ArbitTestCase {
+	
+	/// 10^29: about ten thousand million times bigger than Int64.max
+	let big = A("100000000000000000000000000000")
+	
+	func test_Values_Over_Int64() throws {
+		
+		XCTAssertNil( Int64(exactly: big) )
+		XCTAssertNil( UInt64(exactly: big) )
+		XCTAssertTrue( big > T(UInt64.max) )
+		
+		let up = Array(stride(from: big, to: big + 5, by: 1))
+		
+		XCTAssertEqual( up.map(\.description), [
+			"100000000000000000000000000000",
+			"100000000000000000000000000001",
+			"100000000000000000000000000002",
+			"100000000000000000000000000003",
+			"100000000000000000000000000004",
+		])
+		XCTAssertTrue( up.allSatisfy { Int64(exactly: $0) == nil } )
+		
+		/// `through` takes the end too
+		XCTAssertEqual( Array(stride(from: big, through: big + 3, by: 1)).last, big + 3 )
+		XCTAssertEqual( Array(stride(from: big, through: big + 3, by: 1)).count, 4 )
+		
+		/// Down
+		XCTAssertEqual( stride(from: big, through: big - 6, by: -2).map(\.description), [
+			"100000000000000000000000000000",
+			"99999999999999999999999999998",
+			"99999999999999999999999999996",
+			"99999999999999999999999999994",
+		])
+		
+		/// Negative numbers under Int64.min
+		XCTAssertEqual( stride(from: -big, to: -big - 3, by: -1).map(\.description), [
+			"-100000000000000000000000000000",
+			"-100000000000000000000000000001",
+			"-100000000000000000000000000002",
+		])
+		
+		/// Through zero, from under Int64.min to over Int64.max
+		let across = Array(stride(from: -big, through: big, by: big))
+		XCTAssertEqual( across, [-big, 0, big] )
+	}
+	
+	func test_Steps_Over_Int64() throws {
+		
+		let step = A("20000000000000000000") // 2 × 10^19 > UInt64.max
+		XCTAssertNil( UInt64(exactly: step) )
+		
+		XCTAssertEqual( stride(from: T(0), through: A("60000000000000000000"), by: step).map(\.description),
+							 ["0", "20000000000000000000", "40000000000000000000", "60000000000000000000"] )
+		
+		XCTAssertEqual( Array(stride(from: T(0), to: big * 10, by: big)).count, 10 )
+		XCTAssertEqual( Array(stride(from: T(0), to: big * 10, by: big)).last, big * 9 )
+		
+		/// Powers of two over 64 bits as steps
+		let power = T(100).pow2()
+		XCTAssertEqual( Array(stride(from: power, through: power * 4, by: power)), [power, power * 2, power * 3, power * 4] )
+		
+		/// The sequence is lazy: an astronomic range costs nothing until it is walked
+		XCTAssertEqual( Array(stride(from: big, to: big * big * big, by: big).prefix(3)), [big, big * 2, big * 3] )
+	}
+	
+	func test_Fraction_Steps_Are_Exact() throws {
+		
+		/// With Double the tenth step would be 0.9999999999999999, and the end would be missed or doubled
+		XCTAssertEqual( stride(from: A("0"), through: A("1"), by: A("0.1")).map(\.description),
+							 ["0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1"] )
+		
+		XCTAssertEqual( stride(from: A("0"), to: A("1"), by: A("0.25")).map(\.description), ["0", "0.25", "0.5", "0.75"] )
+		
+		/// A tiny step on a huge number: 51 significant digits
+		let tiny = A("0.0000000000000000000001")
+		XCTAssertEqual( stride(from: big, to: big + tiny * 3, by: tiny).map(\.description), [
+			"100000000000000000000000000000",
+			"100000000000000000000000000000.0000000000000000000001",
+			"100000000000000000000000000000.0000000000000000000002",
+		])
+		
+		/// No error is collected over many steps
+		let values = Array(stride(from: big, through: big + 10, by: A("0.001")))
+		XCTAssertEqual( values.count, 10_001 )
+		XCTAssertEqual( values.last, big + 10 )
+		XCTAssertEqual( values[1_234], big + A("1.234") )
+	}
+	
+	func test_Count_And_Sum() throws {
+		
+		XCTAssertEqual( Array(stride(from: big, to: big + 1000, by: 1)).count, 1000 )
+		XCTAssertEqual( Array(stride(from: big, to: big + 1000, by: 7)).count, 143 )
+		
+		/// The sum of an arithmetic sequence: (count) × (first + last) / 2
+		let sum = stride(from: big, through: big + 100, by: 1).reduce(T(0), +)
+		XCTAssertEqual( sum, (T(101) * (big + big + 100)).divided(by: 2) )
+		XCTAssertEqual( sum.description, "10100000000000000000000000005050" )
+		
+		var walked = T(0)
+		for value in stride(from: big, through: big + 9, by: 3) { walked += value - big }
+		XCTAssertEqual( walked, 18 ) // 0 + 3 + 6 + 9
+		
+		XCTAssertTrue ( stride(from: big, to: big + 10, by: 2).contains(big + 4) )
+		XCTAssertFalse( stride(from: big, to: big + 10, by: 2).contains(big + 5) )
+		XCTAssertFalse( stride(from: big, to: big + 10, by: 2).contains(big + 10) )
+		XCTAssertTrue ( stride(from: big, through: big + 10, by: 2).contains(big + 10) )
+	}
+	
+	func test_Empty() throws {
+		
+		XCTAssertEqual( Array(stride(from: big, to: big, by: 1)), [] )
+		XCTAssertEqual( Array(stride(from: big, through: big, by: 1)), [big] )
+		
+		/// The step points away from the end
+		XCTAssertEqual( Array(stride(from: big, to: big + 5, by: -1)), [] )
+		XCTAssertEqual( Array(stride(from: big, to: big - 5, by: 1)), [] )
+		
+		/// A not-a-number step gives nothing
+		XCTAssertEqual( Array(stride(from: T(0), to: T(5), by: T.nan)).count, 0 )
+		
+		/// An infinite end is an endless sequence, like at the floating point types
+		XCTAssertEqual( Array(stride(from: big, to: T.inf, by: big).prefix(3)), [big, big * 2, big * 3] )
+	}
+	
+	func test_Distance_And_Advanced() throws {
+		
+		XCTAssertEqual( (-big).distance(to: big), big * 2 )
+		XCTAssertEqual( big.distance(to: -big), -(big * 2) )
+		XCTAssertEqual( big.distance(to: big), 0 )
+		XCTAssertEqual( big.advanced(by: -big - big), -big )
+		XCTAssertEqual( big.advanced(by: A("0.5")).description, "100000000000000000000000000000.5" )
+		XCTAssertEqual( T(3).distance(to: 10), 7 )
+		XCTAssertEqual( T(3).advanced(by: -5), -2 )
+		
+		/// The two are the inverse of each other: a.advanced(by: a.distance(to: b)) == b
+		var generator = SeededGenerator(seed: 41)
+		
+		for _ in 1...200 {
+			let a = A(randomNumber(&generator, int: 0...40, frc: 0...20))
+			let b = A(randomNumber(&generator, int: 0...40, frc: 0...20))
+			
+			XCTAssertEqual( a.advanced(by: a.distance(to: b)), b, "\(a) → \(b)")
+			XCTAssertEqual( a.distance(to: a.advanced(by: b)), b, "\(a) + \(b)")
+			XCTAssertEqual( a.distance(to: b), -b.distance(to: a) )
+		}
+	}
+	
+	func test_Ranges() throws {
+		
+		let range = big...(big + 10)
+		
+		XCTAssertTrue ( range.contains(big) )
+		XCTAssertTrue ( range.contains(big + 10) )
+		XCTAssertTrue ( range.contains(big + A("0.5")) )
+		XCTAssertFalse( range.contains(big - A("0.0000000001")) )
+		XCTAssertFalse( range.contains(big + A("10.0000000001")) )
+		XCTAssertFalse( range.contains(T(Int64.max)) )
+		XCTAssertFalse( range.contains(T.nan) )
+		
+		XCTAssertFalse( (big..<(big + 10)).contains(big + 10) )
+		XCTAssertTrue ( (big...).contains(big * big) )
+		XCTAssertTrue ( (...big).contains(-big * big) )
+		
+		XCTAssertEqual( range.clamped(to: (big + 5)...(big + 20)), (big + 5)...(big + 10) )
+		XCTAssertTrue ( range.overlaps((big + 10)...(big + 20)) )
+		XCTAssertFalse( range.overlaps((big + 11)...(big + 20)) )
+		
+		XCTAssertEqual( range.lowerBound.distance(to: range.upperBound), 10 )
+		
+		/// In a switch
+		switch big + 3 {
+			case range: break
+			default: XCTFail("the pattern match of the range")
+		}
+	}
+}
